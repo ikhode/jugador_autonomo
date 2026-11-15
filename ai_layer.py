@@ -355,6 +355,46 @@ def validate_legality(decision: PokerDecision, table_input: PokerTableInput) -> 
     return True, decision, ""
 
 
+def _sanitizar_json_decision(raw_text: str) -> str:
+    """Limpia fences markdown, mapea acciones traducidas y sanitiza tipos para PokerDecision."""
+    clean = re.sub(r"```(?:json)?", "", raw_text, flags=re.I).replace("```", "").strip()
+    if "<think>" in clean and "</think>" in clean:
+        clean = clean.split("</think>")[-1].strip()
+    try:
+        data = json.loads(clean)
+        if isinstance(data, dict):
+            acc = str(data.get("accion") or "WAIT").upper().strip()
+            mapa_acciones = {
+                "LANZAR": "RAISE",
+                "APOSTAR": "RAISE",
+                "SUBIR": "RAISE",
+                "LLAMAR": "CALL",
+                "IGUALAR": "CALL",
+                "PAGAR": "CALL",
+                "RETIRARSE": "FOLD",
+                "RETIRAR": "FOLD",
+                "PASAR": "CHECK",
+            }
+            data["accion"] = mapa_acciones.get(acc, acc)
+            if data["accion"] == "ALLIN":
+                data["accion"] = "ALL_IN"
+            data["estado_pantalla"] = "EN_MESA_JUEGO"
+            data["es_mi_turno"] = True
+
+            m_raw = str(data.get("monto_apuesta") or "0")
+            nums = re.findall(r"\d+", m_raw)
+            data["monto_apuesta"] = int(nums[0]) if nums else 0
+
+            try:
+                data["confianza"] = min(1.0, max(0.0, float(data.get("confianza", 0.8))))
+            except Exception:
+                data["confianza"] = 0.8
+            return json.dumps(data, ensure_ascii=False)
+    except Exception:
+        pass
+    return clean
+
+
 def _default_deterministic_fallback(dom_data: Optional[dict], reason: str) -> PokerDecision:
     """Fallback determinista mínimo seguro cuando no se inyecta motor externo."""
     dom = dom_data or {}
@@ -461,9 +501,11 @@ class AILayer:
 
         if str(model_name).startswith("cf-") or "llama" in str(model_name) or "deepseek" in str(model_name):
             try:
-                return self._invoke_cloudflare_ai(model_name, contents, timeout_sec)
+                cf_timeout = min(11.0, timeout_sec)
+                return self._invoke_cloudflare_ai(model_name, contents, cf_timeout)
             except Exception as e:
                 logger.warning("Error invocando Cloudflare Workers AI (%s): %s", model_name, e)
+                raise
                 raise
 
         assert self._client is not None
@@ -592,7 +634,7 @@ class AILayer:
                     trace.steps.append(StepTrace(step="model_call", duration_ms=call_ms, status="OK", detail=model_name))
 
                     val_t0 = time.perf_counter()
-                    clean_json = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.S).strip()
+                    clean_json = _sanitizar_json_decision(raw_text)
                     try:
                         parsed_decision = PokerDecision.model_validate_json(clean_json)
                         trace.schema_valid = True
