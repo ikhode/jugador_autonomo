@@ -72,3 +72,13 @@ SELECTORS = {
     "btn_sitout": "#general-popup-button-action-OK, button:has-text('Aceptar Sit-out')",
     "game_over": ".game-over-modal, [data-result]",
 }
+
+# Resiliencia y logging estructurado (Fase 6)
+MAX_CONSECUTIVE_ERRORS = int(os.getenv("MAX_CONSECUTIVE_ERRORS", "10"))
+ERROR_BACKOFF_BASE_SEC = float(os.getenv("ERROR_BACKOFF_BASE_SEC", "0.5"))
+ERROR_BACKOFF_MAX_SEC = float(os.getenv("ERROR_BACKOFF_MAX_SEC", "16.0"))
+HAND_WATCHDOG_TIMEOUT_SEC = float(os.getenv("HAND_WATCHDOG_TIMEOUT_SEC", "120.0"))
+JSON_LOG_PATH = os.getenv(
+    "JSON_LOG_PATH",
+    str(Path(__file__).resolve().parent / "logs" / "bot_decisions.jsonl"),
+)

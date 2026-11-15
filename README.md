@@ -8,11 +8,14 @@ Puede conectarse a **cualquier URL** (tanto local como `http://localhost` o cual
 
 ## 📁 Estructura del Proyecto
 
-- `bot.py`: Bucle principal de automatización con Playwright (Login, navegación, capturas de pantalla y clics en botones).
-- `poker_agent.py`: Agente de Inteligencia Artificial que consulta la API de Gemini mediante el SDK `google-genai` con respuestas estructuradas en JSON.
-- `config.py`: Carga la configuración de URLs, credenciales y selectores web desde el archivo `.env`.
-- `.env`: Variables de entorno (API key de Gemini, URLs, credenciales).
-- `requirements.txt`: Dependencias requeridas.
+- `bot.py`: Bucle principal de automatización con Playwright (login, navegación, extracción de DOM primaria con captura fallback, validación única `validar_accion`, resiliencia con `ControladorResiliencia`, logging JSONL estructurado y ejecución de clics).
+- `poker_gto_engine.py`: Evaluador de manos de 5/7 cartas, proyectos y outs, analizador de textura/blockers, tablas Nash Push/Fold (`<= 10 BB`) y decisor por EV con equidad Monte Carlo/exacta reproducible por semilla.
+- `poker_agent.py`: Agente de IA (`google-genai`) con prioridad de modelos centralizada en `config.GEMINI_MODELS_PRIORITY` y soporte de modo `hibrido` (`resolver_decision_hibrida`).
+- `opponents_profiler.py`: Perfilador de rivales 3-Max en SQLite (`WAL`, banderas por mano, prior bayesiano, intervalos de Wilson y mínimo de 30 manos antes de etiquetar).
+- `poker_experience_memory.py`: Memoria de experiencias pasadas filtrada por `similarity_key`.
+- `analytics_*.py`: Sistema de analíticas, benchmark pareado y dashboard HTML.
+- `config.py`: Configuración centralizada, variables de entorno (`MODO`, `PLAY_MONEY_ONLY`, umbrales de potencia y resiliencia) y selectores DOM.
+- `requirements.txt` y `requirements-dev.txt`: Dependencias de ejecución y desarrollo (`pytest`).
 
 ---
 
@@ -25,9 +28,10 @@ Puede conectarse a **cualquier URL** (tanto local como `http://localhost` o cual
 
 ## 🚀 Instalación Paso a Paso
 
-1. Instala las dependencias necesarias de Python:
+1. Instala las dependencias necesarias de Python (o `requirements-dev.txt` para ejecutar tests):
    ```bash
    pip install -r requirements.txt
+   pip install -r requirements-dev.txt
    ```
 
 2. Instala los navegadores necesarios para Playwright:

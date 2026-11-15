@@ -35,6 +35,117 @@ analytics_logger = PokerAnalyticsLogger(
     async_mode=True,
 ) if getattr(config, "ANALYTICS_ENABLED", True) else None
 
+
+def log_json_estructurado(
+    event: str,
+    hand_id: str = "",
+    decision_id: str = "",
+    payload: Optional[dict] = None,
+    log_path: Optional[str] = None,
+) -> dict:
+    """Escribe un evento estructurado en JSONL con hand_id y decision_id."""
+    record = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "event": str(event),
+        "hand_id": str(hand_id or ""),
+        "decision_id": str(decision_id or ""),
+    }
+    if isinstance(payload, dict):
+        record.update(payload)
+    target = Path(log_path or getattr(config, "JSON_LOG_PATH", "logs/bot_decisions.jsonl"))
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    return record
+
+
+def calcular_backoff_segundos(
+    consecutive_errors: int,
+    base: Optional[float] = None,
+    cap: Optional[float] = None,
+) -> float:
+    """Calcula espera exponencial con tope ante errores consecutivos."""
+    b = float(base if base is not None else getattr(config, "ERROR_BACKOFF_BASE_SEC", 0.5))
+    c = float(cap if cap is not None else getattr(config, "ERROR_BACKOFF_MAX_SEC", 16.0))
+    if consecutive_errors <= 0:
+        return 0.0
+    return min(c, b * (2 ** (consecutive_errors - 1)))
+
+
+def detectar_desconexion(dom_data: Optional[dict] = None, page=None, err: Optional[Exception] = None) -> bool:
+    """Detecta desconexión por DOM, estado de pestaña o excepción de red/navegador."""
+    if page is not None:
+        try:
+            if page.is_closed():
+                return True
+        except Exception:
+            return True
+
+    if isinstance(dom_data, dict):
+        texto = " ".join([
+            str(dom_data.get("modales_visibles") or ""),
+            str(dom_data.get("estado_mesa") or ""),
+            str(dom_data.get("botones_visibles") or ""),
+        ]).lower()
+        for kw in ("desconect", "reconnecting", "connection lost", "sin conexión", "sin conexion", "network error", "offline"):
+            if kw in texto:
+                return True
+
+    if err is not None:
+        msg = f"{type(err).__name__}: {err}".lower()
+        for kw in ("err_internet_disconnected", "net::err_", "connectionreset", "targetclosed", "browser has been closed", "disconnected"):
+            if kw in msg:
+                return True
+
+    return False
+
+
+class ControladorResiliencia:
+    """Controla errores consecutivos, backoff exponencial y watchdog por mano."""
+
+    def __init__(
+        self,
+        max_consecutive_errors: Optional[int] = None,
+        hand_watchdog_timeout_sec: Optional[float] = None,
+    ):
+        self.max_consecutive_errors = int(
+            max_consecutive_errors if max_consecutive_errors is not None else getattr(config, "MAX_CONSECUTIVE_ERRORS", 10)
+        )
+        self.hand_watchdog_timeout_sec = float(
+            hand_watchdog_timeout_sec if hand_watchdog_timeout_sec is not None else getattr(config, "HAND_WATCHDOG_TIMEOUT_SEC", 120.0)
+        )
+        self.consecutive_errors = 0
+        self.hand_started_ts: Optional[float] = None
+        self.current_hand_key: Optional[str] = None
+
+    def registrar_exito(self) -> None:
+        self.consecutive_errors = 0
+
+    def registrar_error(self, err: Optional[Exception] = None) -> tuple[bool, float]:
+        self.consecutive_errors += 1
+        backoff = calcular_backoff_segundos(self.consecutive_errors)
+        should_stop = self.consecutive_errors >= self.max_consecutive_errors
+        return should_stop, backoff
+
+    def actualizar_mano_watchdog(self, hand_key: str, now: Optional[float] = None) -> None:
+        t = time.time() if now is None else float(now)
+        if hand_key != self.current_hand_key:
+            self.current_hand_key = hand_key
+            self.hand_started_ts = t
+
+    def verificar_watchdog_mano(self, now: Optional[float] = None) -> bool:
+        if self.hand_started_ts is None:
+            return False
+        t = time.time() if now is None else float(now)
+        return (t - self.hand_started_ts) > self.hand_watchdog_timeout_sec
+
+    def reiniciar_watchdog_mano(self) -> None:
+        self.hand_started_ts = None
+        self.current_hand_key = None
+
 # ---------------------------------------------------------
 # ACUMULADOR DE HISTORIAL COMPLETO DE PARTIDA Y TORNEO
 # ---------------------------------------------------------
@@ -2035,6 +2146,7 @@ def main():
             ultimo_mano_street_key = None
             ultimo_modal_id = None
             ultimo_tiempo_actividad = time.time()
+            resiliencia = ControladorResiliencia()
 
             try:
                 while True:
@@ -2078,6 +2190,20 @@ def main():
                             time.sleep(2.0)
                             continue
 
+                        if detectar_desconexion(dom_data, page=page):
+                            print("⚠️ [DESCONEXIÓN] Detectada pérdida de conexión en mesa/navegador. Esperando backoff...")
+                            log_json_estructurado(
+                                "disconnection",
+                                hand_id=f"hand_{tracker.hand_number}",
+                                payload={"modales": dom_data.get("modales_visibles", ""), "estado": dom_data.get("estado_mesa", "")},
+                            )
+                            should_stop, backoff = resiliencia.registrar_error()
+                            time.sleep(backoff)
+                            if should_stop:
+                                print("🛑 [PARADA SEGURA] Límite de errores consecutivos por desconexión alcanzado.")
+                                break
+                            continue
+
                         es_mi_turno = bool(dom_data.get('es_mi_turno') or tracker.http_turn_signal)
                         if es_mi_turno:
                             ultimo_tiempo_actividad = time.time()
@@ -2098,6 +2224,20 @@ def main():
                         bote = dom_data["bote"]
                         botones = dom_data.get('botones_visibles', '') or dom_data.get('opciones_disponibles', '')
                         modales_o_botones = " | ".join(filter(None, [botones, dom_data.get('modales_visibles', '')]))
+
+                        if mis_cartas:
+                            resiliencia.actualizar_mano_watchdog(f"{tracker.hand_number}:{mis_cartas}")
+                            if resiliencia.verificar_watchdog_mano():
+                                print("⏱️ [WATCHDOG] Mano excedió tiempo máximo sin resolución; reiniciando estado local de mano.")
+                                log_json_estructurado(
+                                    "hand_watchdog_timeout",
+                                    hand_id=f"hand_{tracker.hand_number}",
+                                    payload={"mis_cartas": mis_cartas, "street": tracker.current_street},
+                                )
+                                resiliencia.reiniciar_watchdog_mano()
+                                tracker.reset_mano()
+                        else:
+                            resiliencia.reiniciar_watchdog_mano()
 
                         turno_id_actual = f"{mis_cartas}|{comunitarias}|{bote}|{botones}"
                         turno_street_key = (tracker.hand_number, tracker.current_street, mis_cartas, comunitarias)
@@ -2171,6 +2311,20 @@ def main():
                             print(f"⚡ [DECISIÓN IA ({dt:.2f}s)]: {decision.accion} | Confianza: {decision.confianza:.2f} | {decision.evaluacion}")
 
                             accion_ejecutada = ejecutar_accion(target_mesa, decision, dom_data=dom_data)
+                            log_json_estructurado(
+                                "decision",
+                                hand_id=f"hand_{tracker.hand_number}",
+                                decision_id=f"dec_{tracker.hand_number}_{ciclo}",
+                                payload={
+                                    "street": tracker.current_street,
+                                    "decision_source": decision_source,
+                                    "intended_action": getattr(decision, "accion", ""),
+                                    "executed_action": accion_ejecutada,
+                                    "monto": getattr(decision, "monto", 0),
+                                    "confianza": getattr(decision, "confianza", 0.0),
+                                    "latency_ms": round(dt * 1000.0, 2),
+                                },
+                            )
                             tracker.last_hand_tier = (dom_data.get("gto_preflop") or {}).get("tier", "DESCONOCIDO")
                             tracker.last_board_texture = (dom_data.get("gto_textura") or {}).get("textura_mesa", "DESCONOCIDA")
                             tracker.last_opp_archetype = (dom_data.get("perfil_rival") or {}).get("estilo", "Desconocido")
@@ -2228,11 +2382,29 @@ def main():
                         else:
                             time.sleep(0.05)
 
+                        resiliencia.registrar_exito()
+
                     except KeyboardInterrupt:
                         raise
                     except Exception as e:
-                        print(f"ℹ️ Nota de autorrecuperación en el bucle: {e}")
-                        time.sleep(0.5)
+                        should_stop, backoff = resiliencia.registrar_error(e)
+                        is_disc = detectar_desconexion(page=page, err=e)
+                        log_json_estructurado(
+                            "loop_error",
+                            hand_id=f"hand_{tracker.hand_number}",
+                            payload={
+                                "error": str(e),
+                                "error_type": type(e).__name__,
+                                "consecutive_errors": resiliencia.consecutive_errors,
+                                "backoff_sec": backoff,
+                                "disconnection": is_disc,
+                            },
+                        )
+                        print(f"ℹ️ Nota de autorrecuperación en el bucle (#{resiliencia.consecutive_errors}, backoff={backoff:.2f}s): {e}")
+                        time.sleep(backoff)
+                        if should_stop:
+                            print("🛑 [PARADA SEGURA] Límite de errores consecutivos alcanzado. Deteniendo el bucle.")
+                            break
 
             except KeyboardInterrupt:
                 print("\n🛑 Bot detenido por el usuario (Ctrl + C).")

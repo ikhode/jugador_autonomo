@@ -59,18 +59,18 @@ Para evitar falsos positivos al comparar múltiples versiones experimentales ($v
 1. **Prueba $t$ Pareada** sobre los escenarios compartidos (`scenario_id`) y **Prueba $t$ de Welch** para muestras independientes.
 2. **Tamaño del Efecto ($d$ de Cohen)** e **Intervalo de Confianza al 95%** de la diferencia ($\text{IC}_{95\%}(\Delta\text{EV})$).
 3. **Corrección Secuencial de Holm-Bonferroni ($\alpha = 0.05$)**: ordena los $m$ $p$-valores de menor a mayor ($p_{(1)} \le \dots \le p_{(m)}$) y calcula $p_{(k)}^{\text{Holm}} = \max_{j \le k} \min(1, (m - j + 1) p_{(j)})$.
-4. **Tres Estados Estrictos**:
-   - `MEJORA`: Evidencia favorable y suficiente ($n \ge 30$, $p_{\text{Holm}} < 0.05$, $\text{IC}_{95\%,\text{inf}} > 0$, $d \ge 0.15$).
-   - `INCONCLUSO`: Evidencia estadística insuficiente tras corrección por comparaciones múltiples o muestra exploratoria ($n < 50$).
+4. **Tres Estados Estrictos (`clasificar_estado_comparacion`)**:
+   - `MEJORA`: Evidencia favorable y suficiente ($p_{\text{Holm}} < 0.05$, $\text{IC}_{95\%,\text{inf}} > 0$, $d \ge 0.15$) **y** tamaño muestral suficiente: en partidas en vivo exige $n \ge 5000$ manos por versión (`MIN_LIVE_HANDS_FOR_IMPROVEMENT`); en benchmark pareado exige el mínimo justificado por la potencia estadística calculada (`calcular_tamano_muestra_necesario`, con $\alpha = 0.05$ y potencia $0.80$).
+   - `INCONCLUSO`: Evidencia estadística insuficiente o muestra por debajo del umbral requerido.
    - `REGRESIÓN`: Deterioro estadísticamente significativo en EV o incremento crítico en la tasa de errores.
 
 ---
 
 ## 4. Comandos de Ejecución y Mantenimiento
 
-### Ejecutar la Suite de Pruebas Automatizadas (12 suites unitarias, de concurrencia e integridad)
+### Ejecutar la Suite de Pruebas Automatizadas
 ```bash
-python3 tests/test_analytics.py
+for f in tests/test_*.py; do python3 "$f"; done
 ```
 
 ### Generar el Dashboard de 9 Secciones, Reporte en Consola y Exportaciones CSV/JSON
