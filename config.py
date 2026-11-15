@@ -12,7 +12,9 @@ GAME_USER = os.getenv("GAME_USER", "")
 GAME_PASSWORD = os.getenv("GAME_PASSWORD", "")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash-lite")
+ACTIVE_MODEL = os.getenv("ACTIVE_MODEL", "gemini-3.6-flash-lite")  # "gemini-3.1-flash-lite", "gemma-4b-local", "gto-heuristic"
+GEMMA_LOCAL_MODEL_PATH = os.getenv("GEMMA_LOCAL_MODEL_PATH", r"C:\Users\SATAP\.android\models\gemma-4-4b\gemma-4-E4B_q4_0-it.gguf")
 
 MODO = os.getenv("MODO", "gemini")  # "gemini" o "heuristico"
 USAR_CAPTURA = os.getenv("USAR_CAPTURA", "false").lower() == "true"

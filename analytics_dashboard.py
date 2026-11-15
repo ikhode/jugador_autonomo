@@ -413,6 +413,14 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
             </div>
         </div>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <div style="display:flex; align-items:center; gap:6px; background:var(--bg-card); border:1px solid var(--border-color); padding:4px 10px; border-radius:6px;">
+                <span style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">🤖 MODELO:</span>
+                <select id="botModelSelect" onchange="switchBotModel(this.value)" style="background:transparent; color:var(--text-main); border:none; font-size:0.8rem; font-weight:600; cursor:pointer; outline:none;">
+                    <option value="gemini-3.1-flash-lite">⚡ Gemini 3.1 Flash-Lite (Cloud)</option>
+                    <option value="gemma-4b-local">💻 Gemma 4B Local (GGUF)</option>
+                    <option value="gto-heuristic">🛡️ Motor Heurístico GTO (0ms)</option>
+                </select>
+            </div>
             <span id="liveSyncBadge" class="badge badge-green">🟢 Auto-Sync Activo</span>
             <span id="dataSourceBadge" class="badge badge-blue">Modo: Cargando...</span>
             <span id="codeHashBadge" class="badge badge-purple mono">Hash: --</span>
@@ -2150,6 +2158,7 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
 
         let lastHandsCount = (RAW_DATA.all_hands || []).length;
         let lastDecisionsCount = (RAW_DATA.all_decisions || []).length;
+<<<<<<< HEAD
         let liveOpponentFilter = 'all';
 
         function setLiveOpponentFilter(filterName) {{
@@ -2266,6 +2275,56 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
         }}
 
         renderLiveSection(RAW_DATA.live_status || {{}}, RAW_DATA.historical_profiles || []);
+        let lastTelemetrySampleCount = (RAW_DATA.system_reliability && RAW_DATA.system_reliability.latency_sample_count) || 0;
+
+        async function updateLiveMesaUI() {{
+            try {{
+                const res = await fetch('/api/live', {{ cache: 'no-store' }});
+                if (!res.ok) return;
+                const live = await res.json();
+
+                if (live && (live.active || live.hand_number)) {{
+                    const mergedLive = Object.assign({{}}, RAW_DATA.live_status || {{}}, live);
+                    RAW_DATA.live_status = mergedLive;
+                    renderLiveSection(mergedLive, RAW_DATA.historical_profiles || []);
+
+                    const statusEl = document.getElementById('bot-live-status-indicator');
+                    if (statusEl) {{
+                        if (live.paused) {{
+                            statusEl.className = 'badge badge-amber';
+                            statusEl.textContent = '⏸️ AGENTE PAUSADO';
+                        }} else {{
+                            statusEl.className = 'badge badge-green';
+                            statusEl.textContent = '🟢 AGENTE EN VIVO / ACTIVO';
+                        }}
+                    }}
+
+                    const activeMod = live.active_model;
+                    const modSelect = document.getElementById('botModelSelect');
+                    if (modSelect && activeMod && document.activeElement !== modSelect) {{
+                        modSelect.value = activeMod;
+                    }}
+                }}
+            }} catch (err) {{
+                // Modo estático o sin servidor activo
+            }}
+        }}
+
+        async function switchBotModel(newModel) {{
+            try {{
+                const res = await fetch('/api/bot/model', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ model: newModel }})
+                }});
+                const data = await res.json();
+                const sel = document.getElementById('botModelSelect');
+                if (sel && data.active_model) sel.value = data.active_model;
+                alert('🤖 ' + (data.message || 'Modelo cambiado a ' + newModel));
+            }} catch(err) {{
+                alert('Error al cambiar de modelo: ' + err);
+            }}
+        }}
 
         async function checkLiveUpdates() {{
             const badge = document.getElementById('liveSyncBadge');
@@ -2273,22 +2332,25 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
                 const res = await fetch('/api/analytics', {{ cache: 'no-store' }});
                 if (!res.ok) throw new Error('Modo archivo estático');
                 const freshData = await res.json();
-
                 RAW_DATA.live_status = freshData.live_status || {{}};
                 RAW_DATA.historical_profiles = freshData.historical_profiles || [];
                 renderLiveSection(RAW_DATA.live_status, RAW_DATA.historical_profiles);
 
                 const newHands = (freshData.all_hands || []).length;
                 const newDecs = (freshData.all_decisions || []).length;
-                if (newHands !== lastHandsCount || newDecs !== lastDecisionsCount) {{
+                const newTelemCount = (freshData.system_reliability && freshData.system_reliability.latency_sample_count) || 0;
+
+                if (newHands !== lastHandsCount || newDecs !== lastDecisionsCount || newTelemCount !== lastTelemetrySampleCount) {{
                     RAW_DATA = freshData;
                     lastHandsCount = newHands;
                     lastDecisionsCount = newDecs;
+                    lastTelemetrySampleCount = newTelemCount;
                     applyDashboardFilters();
                 }}
+
                 if (badge) {{
                     badge.className = 'badge badge-green';
-                    badge.textContent = `🟢 En Vivo (${{newHands}} manos | ${{newDecs}} dec.)`;
+                    badge.textContent = `⚡ Reactivo En Tiempo Real (${{newHands}} manos | ${{newDecs}} dec.)`;
                 }}
             }} catch (err) {{
                 if (badge) {{
@@ -2321,11 +2383,14 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
         window.addEventListener('DOMContentLoaded', () => {{
             initFilters();
             applyDashboardFilters();
-            setInterval(checkLiveUpdates, 3000);
+            updateLiveMesaUI();
+            setInterval(updateLiveMesaUI, 500);
+            setInterval(checkLiveUpdates, 1200);
         }});
     </script>
 </body>
 </html>
+
 """
 
 
@@ -2479,6 +2544,47 @@ def imprimir_resumen_consola(db_path: Path = DB_PATH) -> None:
     print("=" * 96 + "\n")
 
 
+def obtener_estado_live_dict() -> Dict[str, Any]:
+    """Obtiene el estado dinámico en vivo del agente (cartas, pot, calle, eventos y perfil del rival)."""
+    live_info: Dict[str, Any] = {
+        "hand_number": 1,
+        "current_street": "PREFLOP",
+        "my_cards": [],
+        "community_cards": [],
+        "last_pot": 0,
+        "position_name": "DESCONOCIDA",
+        "opp_id": "",
+        "opp_nick": "",
+        "opp_profile": {},
+        "live_events": [],
+        "paused": False,
+        "active": False,
+    }
+    try:
+        import bot
+        if hasattr(bot, "tracker") and bot.tracker:
+            tr = bot.tracker
+            prof = getattr(bot, "profiler", None)
+            opp_p = prof.obtener_perfil_explotativo(tr.opp_id, tr.opp_nick) if prof else {}
+            live_info = {
+                "hand_number": getattr(tr, "hand_number", 1),
+                "current_street": getattr(tr, "current_street", "PREFLOP"),
+                "my_cards": list(getattr(tr, "my_cards", []) or []),
+                "community_cards": list(getattr(tr, "community_cards", []) or []),
+                "last_pot": getattr(tr, "last_pot", 0) or 0,
+                "position_name": getattr(tr, "position_name", "DESCONOCIDA") or "DESCONOCIDA",
+                "opp_id": str(getattr(tr, "opp_id", "") or ""),
+                "opp_nick": str(getattr(tr, "opp_nick", "") or ""),
+                "opp_profile": opp_p,
+                "live_events": [str(ev) for ev in list(getattr(tr, "live_events", []) or [])[-20:]],
+                "paused": getattr(bot, "bot_paused", False),
+                "active": True,
+            }
+    except Exception:
+        pass
+    return live_info
+
+
 def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browser: bool = True) -> None:
     """Inicia un servidor HTTP local para visualizar, controlar y filtrar el Dashboard en vivo."""
     info = generar_dashboard_html(db_path=db_path)
@@ -2494,9 +2600,23 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
                 content = html_path.read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
                 self.send_header("Content-Length", str(len(content)))
                 self.end_headers()
                 self.wfile.write(content)
+            elif parsed.path == "/api/live":
+                live_info = obtener_estado_live_dict()
+                body = json.dumps(live_info, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             elif parsed.path == "/api/analytics":
                 qs = urllib.parse.parse_qs(parsed.query)
                 filters = {k: v[0] for k, v in qs.items() if v}
@@ -2509,6 +2629,9 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
                 body = json.dumps(data, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)

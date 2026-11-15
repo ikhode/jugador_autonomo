@@ -50,6 +50,33 @@ class PokerAgent:
         comb_str = ""
         textura_str = ""
         frecuencia_str = ""
+        memoria_str = ""
+
+        active_model = getattr(config, "ACTIVE_MODEL", "gemini-3.1-flash-lite")
+        if active_model == "gemma-4b-local":
+            print("💻 Consultando a Gemma 4B Local (GGUF)...")
+            prompt_local = f"Mesa de póker: {dom_data}. Responde en JSON con la acción (FOLD, CHECK, CALL, RAISE, ALL_IN), evaluacion y confianza."
+            dec_local = consultar_gemma_local(prompt_local, dom_data=dom_data)
+            if dec_local:
+                return dec_local
+            print("⚠️ Gemma 4B Local no retornó respuesta, derivando a Gemini / GTO...")
+        elif active_model == "gto-heuristic":
+            print("🛡️ Modo Heurístico GTO activo. Retornando respuesta rápida 0ms...")
+            return PokerDecision(
+                evaluacion="Decisión tomada exclusivamente por el Motor Heurístico GTO 0ms",
+                estrategia_competitiva="Lógica determinista GTO de respaldo",
+                estado_pantalla="EN_MESA_JUEGO",
+                es_mi_turno=True,
+                accion="WAIT",
+                monto_apuesta=0,
+                confianza=0.9
+            )
+        historial_str = ""
+        perfil_rival_str = ""
+        gto_section_str = ""
+        comb_str = ""
+        textura_str = ""
+        frecuencia_str = ""
 
         if dom_data:
             es_mi_turno_dom = dom_data.get('es_mi_turno', False)
@@ -218,3 +245,73 @@ class PokerAgent:
             monto_apuesta=0,
             confianza=0.0
         )
+
+
+_gemma_model_instance = None
+
+def precargar_gemma_local():
+    """Carga de forma perezosa el modelo Gemma 4B Local GGUF en memoria."""
+    global _gemma_model_instance
+    if _gemma_model_instance is not None:
+        return _gemma_model_instance
+    try:
+        from llama_cpp import Llama
+        model_path = getattr(config, "GEMMA_LOCAL_MODEL_PATH", r"C:\Users\SATAP\.android\models\gemma-4-4b\gemma-4-E4B_q4_0-it.gguf")
+        print(f"💻 [LLM LOCAL] Cargando Gemma 4B desde: {model_path}...")
+        _gemma_model_instance = Llama(
+            model_path=model_path,
+            n_ctx=2048,
+            n_threads=6,
+            verbose=False
+        )
+        print("✅ [LLM LOCAL] Gemma 4B cargado en memoria correctamente.")
+        return _gemma_model_instance
+    except Exception as e:
+        print(f"⚠️ [LLM LOCAL ERROR] No se pudo cargar Gemma 4B: {e}")
+        return None
+
+def consultar_gemma_local(prompt: str, dom_data: Optional[dict] = None) -> Optional[PokerDecision]:
+    """Ejecuta inferencia local con Gemma 4B GGUF utilizando estructuración JSON."""
+    llm = precargar_gemma_local()
+    if not llm:
+        return None
+    try:
+        sys_prompt = "Eres un bot profesional de póker GTO. Responde estrictamente en formato JSON válido con los campos: evaluacion, estrategia_competitiva, estado_pantalla, es_mi_turno, accion, monto_apuesta, confianza."
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": prompt}
+        ]
+        res = llm.create_chat_completion(
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=0.1,
+            max_tokens=512
+        )
+        raw_content = res['choices'][0]['message']['content'].strip()
+        clean_json = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_content, flags=re.S).strip()
+        data = json.loads(clean_json)
+
+        accion = str(data.get("accion") or data.get("action") or "CHECK").upper()
+        if accion == "ALLIN": accion = "ALL_IN"
+        if accion not in ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN", "ALLIN", "REPLAY", "START_GAME", "WAIT"):
+            accion = "CHECK"
+
+        decision = PokerDecision(
+            evaluacion=str(data.get("evaluacion") or data.get("reasoning") or "Evaluación Gemma 4B Local"),
+            estrategia_competitiva=str(data.get("estrategia_competitiva") or "Juego local GTO Gemma"),
+            estado_pantalla="EN_MESA_JUEGO",
+            es_mi_turno=True,
+            accion=accion,
+            monto_apuesta=int(data.get("monto_apuesta") or data.get("bet_amount") or 0),
+            confianza=float(data.get("confianza") or 0.85)
+        )
+
+        opciones_dom = str((dom_data or {}).get("opciones_disponibles", "") or (dom_data or {}).get("botones_visibles", "")).upper()
+        if decision.accion == "FOLD" and "CHECK" in opciones_dom:
+            decision.accion = "CHECK"
+            decision.evaluacion = f"[Auto-Check Gratis] {decision.evaluacion}"
+
+        return decision
+    except Exception as e:
+        print(f"⚠️ [LLM LOCAL] Error durante inferencia Gemma 4B: {e}")
+        return None

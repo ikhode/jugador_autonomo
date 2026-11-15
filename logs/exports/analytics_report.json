@@ -1,7 +1,7 @@
 {
-  "exported_at": "2026-11-14 23:38:13",
+  "exported_at": "2026-11-14 23:40:30",
   "traceability": {
-    "code_hash": "351d0068e38ad2ca",
+    "code_hash": "144ed039d539ef6a",
     "db_path": "logs/poker_stats.db",
     "filters_applied": {}
   },
@@ -11330,14 +11330,14 @@
       },
       "stat_processing_latency": {
         "count": 1,
-        "mean_ms": 117.08,
-        "min_ms": 117.08,
-        "p50_ms": 117.08,
-        "p95_ms": 117.08,
-        "p99_ms": 117.08,
-        "max_ms": 117.08
+        "mean_ms": 114.554,
+        "min_ms": 114.554,
+        "p50_ms": 114.554,
+        "p95_ms": 114.554,
+        "p99_ms": 114.554,
+        "max_ms": 114.554
       },
-      "memory_rss_mb": 84.5,
+      "memory_rss_mb": 85.19,
       "storage_errors_total": 0,
       "dropped_records_total": 0,
       "max_pending_queue_tasks": 0,
@@ -11348,7 +11348,7 @@
         "duplicate_hands_groups": 0,
         "duplicate_decisions_groups": 0,
         "db_size_kb": 1576.0,
-        "code_hash": "351d0068e38ad2ca",
+        "code_hash": "144ed039d539ef6a",
         "counts": {
           "live_hands": 67,
           "benchmark_hands": 480,
