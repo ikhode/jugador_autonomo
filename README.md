@@ -74,3 +74,16 @@ Inicia el jugador autónomo ejecutando:
 ```bash
 python bot.py
 ```
+
+---
+
+## 🧠 Capa de IA, Trazabilidad y Evaluación Offline
+
+- **Arquitectura (`ai_layer.py` + `poker_agent.py`):** `ai_layer.AILayer` ejecuta el flujo tipado `decidir_accion` (`build_prompt` → `model_call` → `schema_validation` → `legality_validation` → `final_result`), con `ModelPolicy` (circuit breaker por modelo, cooldowns diferenciados 404/cuota diaria/429-503 y backoff con jitter) y fallback determinista garantizado.
+- **Activar/Desactivar Genkit:** Configura `USE_GENKIT=true` o `USE_GENKIT=false` (por defecto `false`) en `.env`. Si `genkit` no está instalado o `USE_GENKIT=false`, degrada limpiamente a `google-genai` directo sin afectar el juego.
+- **Trazabilidad:** Cada decisión guarda `prompt_version`, `prompt_hash`, `model_used`, `retry_count`, `raw_response`, `fallback_reason` y `trace_json` en `analytics_decisions` (`decision_uid`).
+- **Evaluación offline reproducible:**
+  ```bash
+  python3 -m evals.run --prompt v1 --model mock
+  ```
+- **Limitaciones conocidas:** `genkit` para Python está en Beta (`0.13.x`) y `genkit-plugin-google-genai` requiere `google-genai==2.34.0`, por lo que `USE_GENKIT` permanece desactivado por defecto en producción hasta que el SDK salga de Beta.

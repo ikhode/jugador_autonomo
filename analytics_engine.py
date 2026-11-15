@@ -884,7 +884,7 @@ def evaluar_decision_estrategica(
         decision_quality = "ERROR_ESTRATEGICO"
         is_strategic_error = True
 
-    if is_strategic_error and not error_reasons:
+    if (is_strategic_error or ev_lost_bb > 1.10) and not error_reasons:
         error_reasons.append(f"Desviación subóptima ({action_deviation}) con pérdida de {ev_lost_bb:.2f} BB de EV")
 
     return {
@@ -2030,7 +2030,7 @@ class PokerAnalyticsEngine:
             return "SB"
         if "BB" in p or "BIG" in p or "GRANDE" in p:
             return "BB"
-        return "BTN"
+        return "DESCONOCIDA"
 
     def _normalize_profile(self, prof_raw: Optional[str]) -> str:
         p = (prof_raw or "").upper()

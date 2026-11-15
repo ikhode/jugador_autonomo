@@ -11,6 +11,7 @@ from typing import Literal, Optional, Tuple
 from google import genai
 from google.genai import types
 import config
+from ai_layer import AIDecisionResult, AILayer, DecisionTrace, PokerDecision
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +35,6 @@ def optimizar_imagen(image_bytes: bytes) -> tuple[bytes, str]:
         print(f"⚠️ [optimizar_imagen] Error procesando captura ({type(e).__name__}): {e}")
         return image_bytes, "image/png"
 
-class PokerDecision(BaseModel):
-    evaluacion: str = Field(description="Una frase concisa con la evaluación táctica de la mesa")
-    estrategia_competitiva: str = Field(default="Estrategia defensiva de respaldo", description="Breve plan estratégico")
-    estado_pantalla: Literal["EN_MESA_JUEGO", "LOBBY_SELECCION", "FIN_DE_PARTIDA", "PANTALLA_DESCONOCIDA"] = Field(description="Estado detectado")
-    es_mi_turno: bool = Field(description="True si los botones de acción están activos")
-    accion: Literal["FOLD", "CHECK", "CALL", "RAISE", "ALL_IN", "ALLIN", "REPLAY", "START_GAME", "WAIT"] = Field(description="Acción recomendada")
-    monto_apuesta: int = Field(default=0, ge=0, description="Monto sugerido para apostar si la acción es RAISE")
-    confianza: float = Field(default=0.5, ge=0.0, le=1.0, description="Nivel de confianza entre 0.0 y 1.0")
 
 def formatear_perfiles_para_prompt(dom_data: Optional[dict]) -> str:
     """Formatea perfiles multijugador (perfiles_oponentes) o perfil único (perfil_rival) para el prompt."""
@@ -93,28 +86,24 @@ def formatear_perfiles_para_prompt(dom_data: Optional[dict]) -> str:
 
 
 class PokerAgent:
-    def __init__(self, api_key: str = None):
-        key = api_key or config.GEMINI_API_KEY
+    """Adaptador compatible hacia atrás que delega la inferencia a ai_layer.AILayer."""
+
+    def __init__(self, api_key: str = None, ai_layer: Optional[AILayer] = None, fallback_fn=None):
+        key = api_key if api_key is not None else config.GEMINI_API_KEY
         if not key:
             print("⚠️ ADVERTENCIA: No se encontró GEMINI_API_KEY en el archivo .env o variables de entorno.")
-        http_opts = types.HttpOptions(
-            timeout=3500,
-            retry_options=types.HttpRetryOptions(attempts=1),
-        )
-        self.client = genai.Client(api_key=key, http_options=http_opts) if key else genai.Client(http_options=http_opts)
         self.primary_model = config.GEMINI_MODEL
-        self.model_cooldown_until: dict[str, float] = {}
+        self.ai_layer = ai_layer or AILayer(api_key=key, fallback_fn=fallback_fn)
+        self.last_result: Optional[AIDecisionResult] = None
+        self.last_trace: Optional[DecisionTrace] = None
 
-    def analizar_pantalla(self, image_bytes: Optional[bytes] = None, dom_data: Optional[dict] = None) -> PokerDecision:
-        dom_info_str = ""
-        historial_str = ""
-        perfil_rival_str = ""
-        gto_section_str = ""
-        comb_str = ""
-        textura_str = ""
-        frecuencia_str = ""
-        memoria_str = ""
-
+    def analizar_pantalla(
+        self,
+        image_bytes: Optional[bytes] = None,
+        dom_data: Optional[dict] = None,
+        decision_uid: str = "",
+        hand_uid: str = "",
+    ) -> PokerDecision:
         active_model = getattr(config, "ACTIVE_MODEL", config.GEMINI_MODEL)
         if active_model == "gemma-4b-local":
             print("💻 Consultando a Gemma 4B Local (GGUF)...")
@@ -123,190 +112,24 @@ class PokerAgent:
             if dec_local:
                 return dec_local
             print("⚠️ Gemma 4B Local no retornó respuesta, derivando a Gemini / GTO...")
-        historial_str = ""
-        perfil_rival_str = ""
-        gto_section_str = ""
-        comb_str = ""
-        textura_str = ""
-        frecuencia_str = ""
 
-        if dom_data:
-            es_mi_turno_dom = dom_data.get('es_mi_turno', False)
-            tiempo = dom_data.get('tiempo_restante', '')
-            mis_cartas = dom_data.get('mis_cartas', [])
-            comunitarias = dom_data.get('cartas_comunitarias', [])
-            mis_cartas_str = " ".join(mis_cartas) if isinstance(mis_cartas, list) else str(mis_cartas)
-            comunitarias_str = " ".join(comunitarias) if isinstance(comunitarias, list) else str(comunitarias)
-            historial_str = dom_data.get('historial_mano', '')
-
-            perfil_rival_str = formatear_perfiles_para_prompt(dom_data)
-
-            gto_pre = dom_data.get('gto_preflop', {})
-            gto_math = dom_data.get('gto_math', {})
-            if gto_pre or gto_math:
-                gto_section_str = f"""
-            📐 ANÁLISIS MATEMÁTICO Y MATRIZ DE RANGOS GTO:
-            - Rango Preflop ({gto_pre.get('posicion', 'BTN')} | {gto_pre.get('situacion', 'open')}): Tier [{gto_pre.get('tier', 'N/A')}] (Score: {gto_pre.get('score', 0)}/100) - Mano: {gto_pre.get('mano_code', '')}
-            - Stack Efectivo: {gto_math.get('stack_efectivo_bb', 0)} BB | Bote: {gto_math.get('bote_bb', 0)} BB | A igualar: {gto_math.get('a_igualar_bb', 0)} BB
-            - Pot Odds: {gto_math.get('pot_odds_pct', 0)}% (Precio a pagar para igualar)
-            - Sizings Sugeridos (Apuestas): Pequeño 33%: {gto_math.get('sizing_cbet_pequeno', 0)} | Medio 66%: {gto_math.get('sizing_cbet_estandar', 0)} | Pot: {gto_math.get('sizing_cbet_fuerte', 0)}
-            """
-
-            gto_comb = dom_data.get('gto_combinacion', {})
-            if gto_comb:
-                proyectos_txt = ", ".join(gto_comb.get('proyectos') or []) or "Ninguno"
-                comb_str = f"""
-            🎴 DISTINCIÓN DE COMBINACIÓN (MANO PRIVADA VS MESA):
-            - Clasificación Táctica: {gto_comb.get('categoria')}
-            - Detalle: {gto_comb.get('descripcion')}
-            - ¿Juega solo la mesa (Board Plays)?: {"SI ⚠️ (Tus cartas no mejoran el tablero)" if gto_comb.get('mano_en_mesa') else "NO"}
-            - ¿Es Pareja en Mano (Pocket Pair)?: {"SI ⚡ (Privada de alto valor)" if gto_comb.get('es_pareja_en_mano') else "NO"}
-            - ¿Hay Pareja Compartida en Mesa?: {"SI (Todos los jugadores comparten la pareja de la mesa)" if gto_comb.get('pareja_en_mesa') else "NO"}
-            - Proyectos y Outs: {proyectos_txt} (Outs totales: {gto_comb.get('outs_totales', 0)})
-            """
-
-            gto_textura = dom_data.get('gto_textura', {})
-            if gto_textura:
-                textura_str = f"""
-            🛡️ BLOCKERS (CARD REMOVAL) Y ANÁLISIS DE TEXTURA DE MESA:
-            - Textura Tablero: {gto_textura.get('textura_mesa')}
-            - Blockers en Mano / Mesa: Ases muertos = {gto_textura.get('blockers_ases')} | Reyes muertos = {gto_textura.get('blockers_reyes')}
-            - ESTIMACIÓN DE RANGO POR TEXTURA: {gto_textura.get('estimacion_rango', 'Analizar rango rival según posición y acción')}
-            """
-
-            gto_frec = dom_data.get('gto_frecuencia', {})
-            if gto_frec:
-                frecuencia_str = f"""
-            🎲 VARIANZA GTO Y FRECUENCIA ANTI-EXPLOTACIÓN:
-            - Semilla Frecuencia (1-100): {gto_frec.get('d100')} -> Sugerencia: {gto_frec.get('linea_sugerida')}
-            - INSTRUCCIÓN DE IMPREDECIBILIDAD: Aplica frecuencias mixtas para que ningún rival pueda descifrar tus patrones.
-            """
-
-            memoria_lista = dom_data.get('memoria_errores', [])
-            if memoria_lista:
-                memoria_str = "🧠 RECUERDOS VECTORIALES Y LECCIONES APRENDIDAS DE ERRORES PASADOS:\n"
-                for m in memoria_lista:
-                    memoria_str += f"- ⚠️ LECCIÓN PASADA APRENDIDA: Con Rango [{m['hand_tier']}] en {m['board_texture']} contra {m['opp_archetype']}, la acción '{m['action_taken']}' causó una pérdida de {m['loss_amount']} fichas.\n  RECOMENDACIÓN ANTI-ERROR: {m['lesson_learned']}\n"
-
-            dom_info_str = f"""
-            ESTADO MESA EN TIEMPO REAL:
-            - ES_MI_TURNO: {"SI" if es_mi_turno_dom else "NO"} (tiempo: {tiempo}s)
-            - Cartas mano: {mis_cartas_str or 'N/A'}
-            - Comunitarias: {comunitarias_str or 'Ninguna'}
-            - Bote: {dom_data.get('bote', 0)} | A igualar: {dom_data.get('a_igualar', 0)}
-            - Mi stack: {dom_data.get('mi_stack', 0)} | Stack rivales: {dom_data.get('stack_rival', 0)}
-            - Fuerza mano: {dom_data.get('fuerza_mano', 'N/A')}
-            - OPCIONES DISPONIBLES EN PANTALLA: {dom_data.get('opciones_disponibles', dom_data.get('botones_visibles', ''))}
-            """
-
-        historial_section = f"\nHISTORIAL SECUENCIAL DE LA MANO (EVENTOS PREVIOS):\n{historial_str}\n" if historial_str else ""
-
-        prompt = f"""
-        Eres un Campeón Mundial de Póker Profesional (GTO + Explotativo + Lector de Faroles + Memoria Vectorial).
-        Tu objetivo es jugar con la máxima precisión matemática y táctica para dominar el torneo Twister 3-Max.
-
-        {dom_info_str}
-        {gto_section_str}
-        {comb_str}
-        {textura_str}
-        {frecuencia_str}
-        {perfil_rival_str}
-        {memoria_str}
-        {historial_section}
-
-        ============================================================
-        🏆 REGLAS MAESTRAS DE APRENDIZAJE Y DECISIONES:
-        ============================================================
-        1. APRENDIZAJE DE ERRORES PASADOS: NUNCA repitas una acción que en el pasado provocó una pérdida en una situación similar (revisa la sección RECUERDOS VECTORIALES).
-        2. DISTINCIÓN ENTRE MANO PRIVADA Y MESA COMPARTIDA: Si la pareja o trío está en tu mano privada (Pocket Pair / Set Oculto), juega muy agresivo por valor. Si la pareja es de la mesa compartida, no asumas tener la mejor mano.
-        3. IMPREDECIBILIDAD Y ESTRATEGIA MIXTA GTO: Mezcla tus secuencias usando la Semilla de Frecuencia para alternar entre apuestas de valor, slowplays y semifaroles.
-        4. ANÁLISIS DE TEXTURA Y RANGOS: Evalúa qué combos de valor (sets, dobles parejas, proyectos) y faroles conecta la textura de la mesa con el rango y perfil del rival.
-        5. MODO PUSH/FOLD EN STACK CORTO (<= 10 BB): En stack corto (<= 10 BB efectivos), prioriza ALL_IN o FOLD según rangos Nash en lugar de min-raises.
-        6. ACCIONES LEGALES ESTRICTAS: Selecciona exclusivamente FOLD, CHECK, CALL, RAISE o ALL_IN. Para RAISE, indica 'monto_apuesta'.
-        ============================================================
-        """
-
+        img_opt: Optional[bytes] = None
         if image_bytes:
-            img_bytes_opt, mime_type = optimizar_imagen(image_bytes)
-            request_contents = [
-                types.Part.from_bytes(data=img_bytes_opt, mime_type=mime_type),
-                prompt,
-            ]
-        else:
-            request_contents = [prompt]
+            img_opt, _ = optimizar_imagen(image_bytes)
 
-        prioridad = list(getattr(config, "GEMINI_MODELS_PRIORITY", [self.primary_model]))
-        candidatos = list(dict.fromkeys([self.primary_model, *prioridad]))
-        ahora = time.time()
-        modelos_activos = [m for m in candidatos if ahora >= self.model_cooldown_until.get(m, 0)]
-        if not modelos_activos:
-            modelos_activos = candidatos
-
-        gen_config_kwargs = {
-            "response_mime_type": "application/json",
-            "response_schema": PokerDecision,
-            "temperature": 0.1,
-        }
-        if hasattr(types, "ThinkingConfig"):
-            gen_config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
-
-        for model_name in modelos_activos:
-            try:
-                response = self.client.models.generate_content(
-                    model=model_name,
-                    contents=request_contents,
-                    config=types.GenerateContentConfig(**gen_config_kwargs),
-                )
-
-                raw_text = (response.text or "").strip()
-                if raw_text:
-                    clean_json = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.S).strip()
-                    decision = PokerDecision.model_validate_json(clean_json)
-                    self.primary_model = model_name
-                    if decision.accion == "ALLIN":
-                        decision.accion = "ALL_IN"
-                    # Si CHECK es gratis y el modelo pidió FOLD, convertir automáticamente a CHECK
-                    opciones_dom = str((dom_data or {}).get("opciones_disponibles", "") or (dom_data or {}).get("botones_visibles", "")).upper()
-                    if decision.accion == "FOLD" and "CHECK" in opciones_dom:
-                        decision.accion = "CHECK"
-                        decision.evaluacion = f"[Auto-Check Gratis] {decision.evaluacion}"
-                    # Si el DOM indica opciones de juego activas y el modelo alucinó START_GAME/REPLAY, invalidar a WAIT para que actúe el motor GTO
-                    if dom_data and (dom_data.get('es_mi_turno') or dom_data.get('mis_cartas')) and decision.accion in ("START_GAME", "REPLAY"):
-                        decision.accion = "WAIT"
-                    return decision
-            except Exception as e:
-                err_str = str(e)
-                if "404" in err_str or "NOT_FOUND" in err_str:
-                    self.model_cooldown_until[model_name] = time.time() + 86400
-                elif "PerDay" in err_str or "per day" in err_str.lower():
-                    self.model_cooldown_until[model_name] = time.time() + 3600
-                    print(f"ℹ️ Cuota diaria alcanzada en {model_name}. Desactivado por 1h y promoviendo siguiente modelo...")
-                elif "429" in err_str or "503" in err_str:
-                    self.model_cooldown_until[model_name] = time.time() + 45
-                    print(f"⚠️ Límite por minuto/demanda en {model_name}, rotando por 45s...")
-                else:
-                    print(f"⚠️ Modelo {model_name} no disponible ({type(e).__name__}), probando respaldo...")
-                continue
-
-        # Intentar inferencia local Gemma 4B solo si ACTIVE_MODEL está explícitamente configurado como 'gemma-4b-local'
-        if active_model == "gemma-4b-local":
-            try:
-                prompt_local = f"Mesa de póker: {dom_data}. Responde en JSON con la acción (FOLD, CHECK, CALL, RAISE, ALL_IN), evaluacion y confianza."
-                dec_local = consultar_gemma_local(prompt_local, dom_data=dom_data)
-                if dec_local:
-                    return dec_local
-            except Exception:
-                pass
-
-        return PokerDecision(
-            evaluacion="Respuesta rápida de fallback por timeout o API ocupada",
-            estrategia_competitiva="Fallback por velocidad de API",
-            estado_pantalla="EN_MESA_JUEGO",
-            es_mi_turno=True,
-            accion="WAIT",
-            monto_apuesta=0,
-            confianza=0.0
+        perfil_rival_str = formatear_perfiles_para_prompt(dom_data) if dom_data else ""
+        result = self.ai_layer.decidir(
+            dom_data=dom_data,
+            image_bytes=img_opt,
+            perfil_rival_str=perfil_rival_str,
+            decision_uid=decision_uid,
+            hand_uid=hand_uid,
         )
+        self.last_result = result
+        self.last_trace = result.trace
+        if result.trace.fallback_reason:
+            logger.info("AI fallback reason=%s model=%s", result.trace.fallback_reason, result.trace.model_used)
+        return result.decision
 
 
 _gemma_model_instance = None

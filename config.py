@@ -118,3 +118,20 @@ JSON_LOG_PATH = os.getenv(
     "JSON_LOG_PATH",
     str(Path(__file__).resolve().parent / "logs" / "bot_decisions.jsonl"),
 )
+
+# Capa de IA / Genkit (Parte B)
+USE_GENKIT = os.getenv("USE_GENKIT", "false").lower() == "true"
+GENKIT_DEV_UI = os.getenv("GENKIT_DEV_UI", "false").lower() == "true"
+PROMPT_VERSION = os.getenv("PROMPT_VERSION", "v1")
+AI_DECISION_TIMEOUT_SEC = float(os.getenv("AI_DECISION_TIMEOUT_SEC", "4.5"))
+AI_HTTP_TIMEOUT_MS = int(os.getenv("AI_HTTP_TIMEOUT_MS", "3500"))
+AI_MAX_SCHEMA_RETRIES = int(os.getenv("AI_MAX_SCHEMA_RETRIES", "1"))
+AI_RETRY_ATTEMPTS = int(os.getenv("AI_RETRY_ATTEMPTS", "2"))
+AI_RETRY_BASE_MS = int(os.getenv("AI_RETRY_BASE_MS", "150"))
+AI_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv("AI_CIRCUIT_FAILURE_THRESHOLD", "3"))
+AI_CIRCUIT_OPEN_SEC = float(os.getenv("AI_CIRCUIT_OPEN_SEC", "60.0"))
+AI_COOLDOWN_404_SEC = float(os.getenv("AI_COOLDOWN_404_SEC", "86400.0"))
+AI_COOLDOWN_DAILY_SEC = float(os.getenv("AI_COOLDOWN_DAILY_SEC", "3600.0"))
+AI_COOLDOWN_RATE_SEC = float(os.getenv("AI_COOLDOWN_RATE_SEC", "45.0"))
+AI_LATENCY_OVERHEAD_BUDGET_MS = float(os.getenv("AI_LATENCY_OVERHEAD_BUDGET_MS", "150.0"))
+AI_EVAL_DEFAULT_SEED = int(os.getenv("AI_EVAL_DEFAULT_SEED", "20261114"))

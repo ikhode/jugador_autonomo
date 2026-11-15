@@ -530,7 +530,12 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
 
         const btnCallEl = accionesArea ? accionesArea.querySelector('#CALL, .action-call') : null;
         const callVal = (btnCallEl?.querySelector('.action-value')?.innerText || '').trim();
-        const aIgualar = callVal || apuestasRivales || '0';
+        const btnAllinEl = accionesArea ? accionesArea.querySelector('#ALLIN, .action-allin') : null;
+        const allinVal = (btnAllinEl?.querySelector('.action-value')?.innerText || '').trim();
+        const hayCheckDom = opcionesAccion.includes('CHECK');
+        const hayCallDom = opcionesAccion.includes('CALL');
+        const hayAllinDom = opcionesAccion.includes('ALL_IN') || opcionesAccion.includes('ALLIN');
+        const aIgualar = hayCheckDom ? '0' : (callVal || (!hayCallDom && hayAllinDom ? allinVal : '') || apuestasRivales || '0');
 
         const modales = [];
         if (document.querySelector('.filter-play-button')) modales.push('Jugar Poker');
@@ -1265,14 +1270,26 @@ def obtener_target_mesa(page):
         pass
     return page
 
-def consultar_gemini_con_timeout(agent, screenshot_bytes, dom_data, timeout_seg: float = 8.0) -> Optional[PokerDecision]:
+def consultar_gemini_con_timeout(
+    agent,
+    screenshot_bytes,
+    dom_data,
+    timeout_seg: float = 8.0,
+    decision_uid: str = "",
+    hand_uid: str = "",
+) -> Optional[PokerDecision]:
     """
-    Ejecuta la consulta a Gemini AI en segundo plano con un timeout de 8.0 segundos.
-    Permite que la API complete su análisis estratégico (suele demorar ~3s) garantizando que sea Gemini quien juegue.
-    Mantiene 7.0s de margen de seguridad antes de los 15s de la mesa.
+    Ejecuta la consulta a Gemini AI en segundo plano con un timeout de seguridad.
+    Mantiene margen antes del límite de turno de la mesa.
     """
     try:
-        future = bg_executor.submit(agent.analizar_pantalla, screenshot_bytes, dom_data)
+        future = bg_executor.submit(
+            agent.analizar_pantalla,
+            screenshot_bytes,
+            dom_data,
+            decision_uid=decision_uid,
+            hand_uid=hand_uid,
+        )
         return future.result(timeout=timeout_seg)
     except concurrent.futures.TimeoutError:
         print(f"⏱️ [TIMEOUT GUARDIA {timeout_seg}s] Gemini no respondió a tiempo. Ejecutando respuesta GTO rápida (0ms)...")
@@ -1651,7 +1668,13 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
     gto_textura = dom_data.get('gto_textura') or analizar_textura_mesa_y_blockers(cartas, comunitarias_str)
 
     raw_monto = dom_data.get('monto_apuesta_input', '0') or '0'
-    monto_saneado = int(re.sub(r"[^\d]", "", str(raw_monto)) or 0) or int(gto_math.get('sizing_cbet_estandar') or round(bb * 2.0))
+    monto_dom = int(re.sub(r"[^\d]", "", str(raw_monto)) or 0)
+    bote_num = float(gto_math.get('bote') or _parse_num_dom(dom_data.get('bote'), 0.0) or 0.0)
+    sizing_gto = int(gto_math.get('sizing_cbet_estandar') or round(max(bb * 2.0, bote_num * 0.55)))
+    if not es_preflop and monto_dom <= int(bb) and bote_num >= bb * 3.0:
+        monto_saneado = sizing_gto
+    else:
+        monto_saneado = monto_dom or sizing_gto
 
     hay_check = 'CHECK' in botones
     hay_call = 'CALL' in botones
@@ -1663,17 +1686,18 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
     desc_mano = (gto_comb.get('categoria') if not es_preflop and gto_comb.get('categoria') != 'CARTA ALTA PRIVADA' else None) or fuerza or gto_pre.get('mano_code') or cartas
 
     if modo_allin_or_fold:
+        pot_odds_ao_f = float(gto_math.get('pot_odds_pct') or 0.0)
+        mano_en_mesa_ao_f = bool(gto_comb.get('mano_en_mesa'))
+        subtipo_ao_f = str(gto_comb.get('categoria', ''))
+        fuerte_post_ao_f = (
+            bool(gto_comb.get('es_monstruo') or gto_comb.get('es_doble_pareja') or gto_comb.get('es_set') or gto_comb.get('es_trips') or int(gto_comb.get('rango_categoria') or 0) >= 2)
+            or bool(gto_comb.get('es_top_pair') or gto_comb.get('es_overpair') or 'Top Pair' in subtipo_ao_f or 'Overpair' in subtipo_ao_f)
+            or bool(gto_comb.get('es_color') or gto_comb.get('es_escalera') or gto_comb.get('es_combo_draw'))
+        ) and not mano_en_mesa_ao_f
         if es_preflop:
-            es_jugable_ao_f = tier in ('S', 'A', 'B') or bool(gto_comb.get('es_pareja_en_mano'))
+            es_jugable_ao_f = (tier in ('S', 'A')) or (tier == 'B' and (pot_odds_ao_f <= 36.0 or stack_efectivo_bb <= 12.0))
         else:
-            es_jugable_ao_f = bool(
-                gto_comb.get('es_pareja_en_mano')
-                or gto_comb.get('coincidencias_mesa')
-                or gto_comb.get('es_proyecto_color')
-                or gto_comb.get('es_proyecto_escalera')
-                or gto_comb.get('es_color')
-                or gto_comb.get('es_escalera')
-            )
+            es_jugable_ao_f = fuerte_post_ao_f
         if es_jugable_ao_f:
             return PokerDecision(
                 evaluacion=f"⚡ [Modo All-in or Fold] Mano jugable [{tier}] ({desc_mano}). Push All-in directo.",
@@ -1872,7 +1896,8 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
 
     # 4. Defensa activa con Middle/Bottom Pair o rango jugable evaluando Pot Odds y Textura
     if hay_call:
-        if es_preflop and tier in ('S', 'A', 'B'):
+        pot_odds_preflop = float(gto_math.get('pot_odds_pct') or 0.0)
+        if es_preflop and (tier in ('S', 'A', 'B') or (tier == 'C' and pot_odds_preflop <= 33.0)):
             return PokerDecision(
                 evaluacion=f"⚡ [0ms GTO] Rango jugable Preflop [{tier}] ({desc_mano}). Defendiendo inversión con Call.",
                 estrategia_competitiva="Defensa de rango preflop",
@@ -2274,6 +2299,9 @@ def main():
                             if tracker.http_turn_signal:
                                 tracker.http_turn_signal = False
 
+                        if tracker.current_street == "PREFLOP" and tracker.current_round_no <= 1 and not tracker.community_cards:
+                            dom_data["cartas_comunitarias"] = ""
+
                         actualizar_dom_data_conservando_contexto(
                             dom_data,
                             None,
@@ -2361,14 +2389,25 @@ def main():
                             else:
                                 print("🤖 Consultando a Gemini AI (1 consulta única, timeout máx 4.5s)...")
                                 try:
-                                    decision = consultar_gemini_con_timeout(agent, screenshot_bytes, dom_data=dom_data, timeout_seg=4.5)
+                                    decision = consultar_gemini_con_timeout(
+                                        agent,
+                                        screenshot_bytes,
+                                        dom_data=dom_data,
+                                        timeout_seg=float(getattr(config, "AI_DECISION_TIMEOUT_SEC", 4.5)),
+                                        decision_uid=f"dec_{tracker.hand_number}_{ciclo}",
+                                        hand_uid=f"hand_{tracker.hand_number}",
+                                    )
                                 except Exception as e:
                                     print(f"⚠️ Excepción al consultar Gemini AI: {e}")
 
+                                ai_trace_now = getattr(agent, "last_trace", None)
                                 if not decision or decision.accion in ("WAIT", "START_GAME", "REPLAY"):
-                                    print("🛡️ [RESPALDO DE SEGURIDAD 0ms] Ejecutando acción defensiva rápida...")
+                                    fb_reason = getattr(ai_trace_now, "fallback_reason", "") or ("timeout_or_none" if not decision else f"passive_{decision.accion}")
+                                    print(f"🛡️ [RESPALDO DE SEGURIDAD 0ms] Motivo={fb_reason} -> Ejecutando acción defensiva rápida...")
                                     decision = decidir_accion_rapida(dom_data)
                                     decision_source = "gto_fallback_0ms"
+                                elif getattr(agent, "last_result", None) is not None:
+                                    decision_source = agent.last_result.decision_source
 
                             dt = time.time() - t0
                             print(f"⚡ [DECISIÓN IA ({dt:.2f}s)]: {decision.accion} | Confianza: {decision.confianza:.2f} | {decision.evaluacion}")
@@ -2412,6 +2451,7 @@ def main():
                                         position_name=tracker.position_name,
                                         opp_id=tracker.opp_id,
                                         opp_nick=tracker.opp_nick,
+                                        ai_trace=getattr(agent, "last_trace", None),
                                     )
                                 except Exception:
                                     pass
@@ -2496,4 +2536,13 @@ def main():
         bg_executor.shutdown(wait=False)
 
 if __name__ == "__main__":
+    import signal
+
+    def _handle_sigterm(_signum, _frame):
+        raise SystemExit(0)
+
+    try:
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+    except Exception:
+        pass
     main()

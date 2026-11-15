@@ -158,13 +158,17 @@ def _clasificar_rival(
     pfr: float,
     af: float,
     three_bet: float,
+    acciones_observadas: Optional[int] = None,
 ) -> tuple[str, str]:
     """
     Clasifica el estilo del rival calibrado para 3-Max (Twister).
-    No asigna estilo definitivo con menos de MIN_SAMPLE_FOR_CLASSIFICATION (30) manos.
+    No asigna estilo definitivo con menos de MIN_SAMPLE_FOR_CLASSIFICATION (30) manos
+    ni cuando no se ha observado ninguna acción del rival.
     """
     if manos < MIN_SAMPLE_FOR_CLASSIFICATION:
         return "SIN DATOS", f"Muestra insuficiente ({manos}/{MIN_SAMPLE_FOR_CLASSIFICATION} manos) para clasificar"
+    if acciones_observadas is not None and acciones_observadas <= 0:
+        return "SIN DATOS", "Sin acciones observadas del rival para clasificar"
 
     if vpip < 22.0 and pfr < 16.0:
         return "NIT", "Ultra selectivo y pasivo en 3-Max; foldea demasiado ante presión"
@@ -614,7 +618,10 @@ class OpponentProfiler:
         wtsd_pct = round(min(100.0, (wtsd / saw_flop) * 100.0), 1) if saw_flop > 0 else 0.0
         wwsf_pct = round(min(100.0, (wwsf / saw_flop) * 100.0), 1) if saw_flop > 0 else 0.0
 
-        estilo, tendencia = _clasificar_rival(manos_efectivas, vpip_smoothed, pfr_smoothed, af, three_bet_pct)
+        acciones_obs_total = vpip_eventos + folds_pre + total_acciones_post
+        estilo, tendencia = _clasificar_rival(
+            manos_efectivas, vpip_smoothed, pfr_smoothed, af, three_bet_pct, acciones_observadas=acciones_obs_total
+        )
         confianza_nivel, confianza_pct = _calcular_confianza(manos_efectivas)
 
         perfil = {

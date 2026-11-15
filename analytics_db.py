@@ -270,6 +270,23 @@ def inicializar_esquema_analiticas(db_path: Path = DB_PATH) -> None:
         _ensure_column(conn, "analytics_decisions", "is_missed_opportunity", "INTEGER DEFAULT 0")
         _ensure_column(conn, "analytics_decisions", "enqueue_latency_ms", "REAL DEFAULT 0.0")
         _ensure_column(conn, "analytics_decisions", "sqlite_write_ms", "REAL DEFAULT 0.0")
+        _ensure_column(conn, "analytics_decisions", "prompt_version", "TEXT DEFAULT ''")
+        _ensure_column(conn, "analytics_decisions", "prompt_hash", "TEXT DEFAULT ''")
+        _ensure_column(conn, "analytics_decisions", "model_used", "TEXT DEFAULT ''")
+        _ensure_column(conn, "analytics_decisions", "retry_count", "INTEGER DEFAULT 0")
+        _ensure_column(conn, "analytics_decisions", "raw_response", "TEXT DEFAULT ''")
+        _ensure_column(conn, "analytics_decisions", "fallback_reason", "TEXT DEFAULT ''")
+        _ensure_column(conn, "analytics_decisions", "trace_json", "TEXT DEFAULT '{}'")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+            ("v2_ai_traceability", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
 
         # 6. Tabla de verificación de tendencias de oponentes (Showdowns y patrones verificables)
         conn.execute("""
@@ -828,6 +845,11 @@ class AnalyticsStorage:
 
         action_taken = str(decision_data.get("action_taken") or "WAIT")
         intended_action = str(decision_data.get("intended_action") or action_taken)
+        trace_val = decision_data.get("trace_json")
+        if isinstance(trace_val, dict):
+            trace_json_str = json.dumps(trace_val, ensure_ascii=False)
+        else:
+            trace_json_str = str(trace_val or "{}")
 
         with get_connection(self.db_path) as conn:
             conn.execute(
@@ -846,7 +868,9 @@ class AnalyticsStorage:
                     opponent_id, opponent_nick, opponent_profile,
                     opponent_adaptation_aligned, decision_source, confidence,
                     response_time_ms, enqueue_latency_ms, sqlite_write_ms,
-                    hand_final_result_chips, hand_final_result_bb
+                    hand_final_result_chips, hand_final_result_bb,
+                    prompt_version, prompt_hash, model_used, retry_count,
+                    raw_response, fallback_reason, trace_json
                 ) VALUES (
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
@@ -861,7 +885,9 @@ class AnalyticsStorage:
                     ?, ?, ?,
                     ?, ?, ?,
                     ?, ?, ?,
-                    ?, ?
+                    ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?
                 )
                 ON CONFLICT(decision_uid) DO UPDATE SET
                     is_synthetic = excluded.is_synthetic,
@@ -886,7 +912,14 @@ class AnalyticsStorage:
                     enqueue_latency_ms = excluded.enqueue_latency_ms,
                     sqlite_write_ms = excluded.sqlite_write_ms,
                     hand_final_result_chips = excluded.hand_final_result_chips,
-                    hand_final_result_bb = excluded.hand_final_result_bb
+                    hand_final_result_bb = excluded.hand_final_result_bb,
+                    prompt_version = excluded.prompt_version,
+                    prompt_hash = excluded.prompt_hash,
+                    model_used = excluded.model_used,
+                    retry_count = excluded.retry_count,
+                    raw_response = excluded.raw_response,
+                    fallback_reason = excluded.fallback_reason,
+                    trace_json = excluded.trace_json
                 """,
                 (
                     decision_uid,
@@ -941,6 +974,13 @@ class AnalyticsStorage:
                     round(float(decision_data.get("sqlite_write_ms") or 0.0), 4),
                     round(float(decision_data.get("hand_final_result_chips") or 0.0), 2),
                     round(float(decision_data.get("hand_final_result_bb") or 0.0), 4),
+                    str(decision_data.get("prompt_version") or ""),
+                    str(decision_data.get("prompt_hash") or ""),
+                    str(decision_data.get("model_used") or ""),
+                    int(decision_data.get("retry_count") or 0),
+                    str(decision_data.get("raw_response") or "")[:2000],
+                    str(decision_data.get("fallback_reason") or ""),
+                    trace_json_str,
                 ),
             )
             conn.commit()

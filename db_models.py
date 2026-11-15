@@ -228,6 +228,13 @@ class AnalyticsDecision(Base):
     sqlite_write_ms: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
     hand_final_result_chips: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
     hand_final_result_bb: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String, default="")
+    prompt_hash: Mapped[Optional[str]] = mapped_column(String, default="")
+    model_used: Mapped[Optional[str]] = mapped_column(String, default="")
+    retry_count: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    raw_response: Mapped[Optional[str]] = mapped_column(Text, default="")
+    fallback_reason: Mapped[Optional[str]] = mapped_column(String, default="")
+    trace_json: Mapped[Optional[str]] = mapped_column(Text, default="{}")
 
 # ==============================================================================
 # 7. VERIFICACIÓN DE OPONENTES

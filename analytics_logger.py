@@ -265,6 +265,8 @@ class PokerAnalyticsLogger:
         opp_nick: str = "",
         scenario_id: str = "",
         executed_action: Optional[str] = None,
+        ai_trace: Optional[Any] = None,
+        decision_uid: Optional[str] = None,
     ) -> None:
         """
         Captura los datos de una decisión realmente ejecutada por el bot y despacha su evaluación y guardado.
@@ -275,8 +277,16 @@ class PokerAnalyticsLogger:
         if response_time_ms > 0:
             self.decision_latencies_ms.append(float(response_time_ms))
 
+        trace_dict: Dict[str, Any] = {}
+        if ai_trace is not None:
+            if hasattr(ai_trace, "model_dump"):
+                trace_dict = ai_trace.model_dump()
+            elif isinstance(ai_trace, dict):
+                trace_dict = dict(ai_trace)
+
         snapshot = {
             "dom_data": dict(dom_data or {}),
+            "decision_uid": decision_uid or trace_dict.get("decision_uid") or "",
             "intended_action": intended_act,
             "action_taken": real_act,
             "bet_amount": getattr(decision, "monto_apuesta", 0) or 0,
@@ -289,6 +299,7 @@ class PokerAnalyticsLogger:
             "opp_id": opp_id,
             "opp_nick": opp_nick,
             "scenario_id": scenario_id,
+            "ai_trace": trace_dict,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         self._dispatch(self._procesar_decision_sync, snapshot)
@@ -323,7 +334,7 @@ class PokerAnalyticsLogger:
             opp_id = str(snap["opp_id"] or self.active_hand["opponent_id"] or "")
             opp_nick = str(snap["opp_nick"] or perfil_rival.get("nickname") or self.active_hand["opponent_nick"] or "")
 
-            pos_raw = str(snap["position_name"] or self.active_hand["position"] or "BTN").upper()
+            pos_raw = str(snap["position_name"] or self.active_hand["position"] or "DESCONOCIDA").upper()
             if "DEALER" in pos_raw or "BUTTON" in pos_raw or "BTN" in pos_raw:
                 pos = "BTN"
             elif "SB" in pos_raw or "SMALL" in pos_raw:
@@ -331,7 +342,7 @@ class PokerAnalyticsLogger:
             elif "BB" in pos_raw or "BIG" in pos_raw:
                 pos = "BB"
             else:
-                pos = "BTN"
+                pos = "DESCONOCIDA"
 
             # Evitar incrementar el índice si se registra dos veces el mismo estado de turno
             turn_signature = f"{street}|{raw_hole_cards}|{board}|{pot_size}|{to_call}"
@@ -443,7 +454,9 @@ class PokerAnalyticsLogger:
         enq_ms = float(snap.get("enqueue_latency_ms") or 0.0)
         write_ms_pre = round((time.perf_counter_ns() - t_write_start) / 1_000_000.0, 4)
 
+        ai_trace = snap.get("ai_trace") or {}
         decision_record = {
+            "decision_uid": snap.get("decision_uid") or ai_trace.get("decision_uid") or None,
             "hand_uid": hand_uid_now,
             "session_id": self.session_id,
             "version_id": self.version_id,
@@ -491,6 +504,13 @@ class PokerAnalyticsLogger:
             "response_time_ms": snap["response_time_ms"],
             "enqueue_latency_ms": enq_ms,
             "sqlite_write_ms": write_ms_pre,
+            "prompt_version": ai_trace.get("prompt_version", ""),
+            "prompt_hash": ai_trace.get("prompt_hash", ""),
+            "model_used": ai_trace.get("model_used", ""),
+            "retry_count": ai_trace.get("retry_count", 0),
+            "raw_response": ai_trace.get("raw_response", ""),
+            "fallback_reason": ai_trace.get("fallback_reason", ""),
+            "trace_json": ai_trace,
         }
         saved_dec_uid = self.storage.guardar_decision(decision_record)
 
