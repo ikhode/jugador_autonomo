@@ -541,8 +541,8 @@ class AILayer:
         if hasattr(types, "ThinkingConfig"):
             gen_config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
 
-        # Timeout acotado por llamada a 6.0s para conmutar a Cloudflare Workers AI si Gemini tarda
-        call_timeout = min(6.0, max(1.5, timeout_sec)) if timeout_sec > 1.5 else timeout_sec
+        # Timeout acotado por llamada respetando el presupuesto total (hasta 11.5s)
+        call_timeout = min(11.5, max(1.5, timeout_sec)) if timeout_sec > 1.5 else timeout_sec
 
         def _do_gemini_call():
             return self._client.models.generate_content(
