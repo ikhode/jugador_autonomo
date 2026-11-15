@@ -694,3 +694,15 @@ class OpponentProfiler:
 
     def listar_perfiles_historicos(self) -> List[Dict[str, Any]]:
         return self.listar_todos_los_rivales()
+
+    def close(self) -> None:
+        """Cierra el pool de conexiones SQLite del perfilador de oponentes."""
+        with self._lock:
+            if hasattr(self, "_engine") and self._engine:
+                try:
+                    self._engine.dispose()
+                except Exception:
+                    pass
+
+    def dispose(self) -> None:
+        self.close()

@@ -176,6 +176,7 @@ class TestGTOAndDecisions(unittest.TestCase):
                 opp_archetype="Nit",
             )
             self.assertEqual(len(misses), 0)
+            mem.close()
 
         # actualizar_dom_data_conservando_contexto
         dom = {

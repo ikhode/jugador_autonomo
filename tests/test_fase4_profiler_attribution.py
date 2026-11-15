@@ -22,8 +22,16 @@ class TestFase4ProfilerAndAttribution(unittest.TestCase):
         self.profiler = OpponentProfiler(db_path=self.db_path)
 
     def tearDown(self):
-        self.profiler._engine.dispose()
-        self.tmpdir.cleanup()
+        try:
+            self.profiler.close()
+            if hasattr(self.profiler, "_SessionLocal"):
+                self.profiler._SessionLocal.close_all()
+        except Exception:
+            pass
+        try:
+            self.tmpdir.cleanup()
+        except Exception:
+            pass
 
     def test_01_atribucion_3max_por_delta_player_states(self):
         t = GameTracker()

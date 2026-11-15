@@ -514,6 +514,27 @@ class PokerAnalyticsLogger:
         }
         saved_dec_uid = self.storage.guardar_decision(decision_record)
 
+        # Real-time Reinforcement: registrar inmediatamente en la memoria si hubo desviación o EV subóptimo
+        if float(eval_res.get("ev_lost_bb") or 0.0) >= 0.2 or eval_res.get("is_strategic_error"):
+            try:
+                from poker_experience_memory import PokerExperienceMemory
+                exp_mem = PokerExperienceMemory()
+                exp_mem.auto_evaluar_y_registrar_mano_perdedora(
+                    hand_tier=dom.get("gto_preflop", {}).get("tier", "DESCONOCIDO"),
+                    board_texture=dom.get("gto_textura", {}).get("textura_mesa", "DESCONOCIDA"),
+                    opp_archetype=opp_profile,
+                    accion_tomada=act,
+                    net_chips=-float(eval_res.get("ev_lost_chips") or 0.0),
+                    ev_diff=-float(eval_res.get("ev_lost_bb") or 0.0),
+                    street=street,
+                    position=pos,
+                    big_blind=self.big_blind,
+                    decision_quality=eval_res.get("decision_quality", ""),
+                )
+                exp_mem.close()
+            except Exception:
+                pass
+
         total_write_ms = round((time.perf_counter_ns() - t_write_start) / 1_000_000.0, 4)
         self.sqlite_write_latencies_ms.append(total_write_ms)
         pending_q = self._queue.qsize() if self._queue is not None else 0

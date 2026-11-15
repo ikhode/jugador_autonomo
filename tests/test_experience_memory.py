@@ -67,6 +67,7 @@ class TestExperienceMemoryProduction(unittest.TestCase):
             self.assertEqual(stats["total_lessons"], 1)
             self.assertEqual(stats["total_occurrences"], 2)
             self.assertAlmostEqual(stats["total_ev_lost_bb"], 7.5, places=2)
+            mem.close()
 
     def test_03_anti_variance_guard_does_not_poison_good_ev_plays(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -98,6 +99,7 @@ class TestExperienceMemoryProduction(unittest.TestCase):
             )
             self.assertIsNotNone(res_err)
             self.assertEqual(mem.obtener_estadisticas_memoria()["total_lessons"], 1)
+            mem.close()
 
     def test_04_ranked_retrieval_and_legacy_db_migration(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -142,6 +144,7 @@ class TestExperienceMemoryProduction(unittest.TestCase):
             ranked = mem.buscar_errores_similares("B", "MESA SECA", "Nit", limit=2, street="FLOP")
             self.assertEqual(len(ranked), 2)
             self.assertEqual(ranked[0]["action_taken"], "RAISE")
+            mem.close()
 
     def test_05_game_tracker_records_loss_without_explicit_net_chips(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -163,6 +166,7 @@ class TestExperienceMemoryProduction(unittest.TestCase):
                 self.assertEqual(stats["total_lessons"], 1)
             finally:
                 bot.experience_memory = orig_mem
+                mem.close()
 
 
 if __name__ == "__main__":

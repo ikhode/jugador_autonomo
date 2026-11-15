@@ -22,6 +22,7 @@ def test_h03_zero_observed_actions_never_classified_nit():
             prof.incrementar_manos_rival("41203111", "doctorwave953", hand_id=h)
         perfil = prof.obtener_perfil_explotativo("41203111", "doctorwave953")
         assert perfil["estilo"] == "SIN DATOS"
+        prof.close()
 
 
 def test_h04_facing_allin_second_pair_does_not_shove_blindly():

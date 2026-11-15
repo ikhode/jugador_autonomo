@@ -876,9 +876,15 @@ def decidir_por_ev(dom_data: dict, seed: Optional[int] = None) -> Dict[str, Any]
         ev_call = equidad * (bote_bb + a_igualar_bb) - (1.0 - equidad) * a_igualar_bb
         evs["CALL"] = round(ev_call, 3)
 
-    # Fold equity según arquetipo rival
+    # Fold equity según arquetipo rival y presión de apuestas enfrentada
     arq_u = opp_arq.upper()
     fe_base = 0.42 if "NIT" in arq_u else (0.15 if "CALLING" in arq_u else 0.30)
+    # Reducir fold equity si el rival ya realizó una apuesta/subida fuerte en la calle actual
+    if a_igualar_bb > bote_bb * 1.2:
+        fe_base *= 0.35
+    elif a_igualar_bb > bote_bb * 0.6:
+        fe_base *= 0.60
+
     if "RAISE" in botones or "BET" in botones:
         sizing_chips = int(gto_math.get("sizing_cbet_estandar") or round(bb * 2.0))
         bet_bb = min(stack_bb, sizing_chips / bb) if stack_bb > 0 else sizing_chips / bb
@@ -897,6 +903,9 @@ def decidir_por_ev(dom_data: dict, seed: Optional[int] = None) -> Dict[str, Any]
         return {"accion": "WAIT", "monto": 0, "ev_bb": 0.0, "equidad": equidad, "evs": {}, "razon": "Sin acciones legales"}
 
     mejor_accion = max(evs, key=lambda k: evs[k])
+    # Si la mejor acción alternativa activa tiene EV negativo, elegir FOLD (EV = 0.0)
+    if "FOLD" in evs and evs[mejor_accion] < 0.0:
+        mejor_accion = "FOLD"
     # Nunca foldear si CHECK es gratis
     if mejor_accion == "FOLD" and "CHECK" in evs:
         mejor_accion = "CHECK"

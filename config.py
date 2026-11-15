@@ -15,13 +15,18 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 GEMINI_MODELS_PRIORITY = list(dict.fromkeys([
     GEMINI_MODEL,
-    "gemini-3.5-flash",
+    "cf-llama-3.1-8b",
+    "cf-deepseek-r1",
     "gemini-3.1-flash-lite",
-    "gemini-3.8-flash",
+    "gemini-3.5-flash",
 ]))
 ACTIVE_MODEL = os.getenv("ACTIVE_MODEL", GEMINI_MODEL)
 AVAILABLE_MODELS = list(dict.fromkeys([*GEMINI_MODELS_PRIORITY, "gemma-4b-local", "gto-heuristic"]))
 GEMMA_LOCAL_MODEL_PATH = os.getenv("GEMMA_LOCAL_MODEL_PATH", "")
+
+# Cloudflare Workers AI
+CF_ACCOUNT_ID = os.getenv("CF_ACCOUNT_ID", "ac96116c5db82e232d04042b84c09399")
+CF_API_TOKEN = os.getenv("CF_API_TOKEN", "cfoat_Q_VSvNcUMZDjl6ZFHIteMvjmDR0azL4gGFL_SwLFHcE.XL25iEiUQyUGJg4hnZzz2N-O2QOcBwnGSPQ__Vhovzk")
 
 MODO = os.getenv("MODO", "gemini").strip().lower()  # "determinista" | "hibrido" | "gemini"
 HYBRID_EV_DIFF_THRESHOLD_BB = float(os.getenv("HYBRID_EV_DIFF_THRESHOLD_BB", "0.5"))
@@ -122,8 +127,8 @@ JSON_LOG_PATH = os.getenv(
 USE_GENKIT = os.getenv("USE_GENKIT", "false").lower() == "true"
 GENKIT_DEV_UI = os.getenv("GENKIT_DEV_UI", "false").lower() == "true"
 PROMPT_VERSION = os.getenv("PROMPT_VERSION", "v1")
-AI_DECISION_TIMEOUT_SEC = float(os.getenv("AI_DECISION_TIMEOUT_SEC", "4.5"))
-AI_HTTP_TIMEOUT_MS = int(os.getenv("AI_HTTP_TIMEOUT_MS", "3500"))
+AI_DECISION_TIMEOUT_SEC = float(os.getenv("AI_DECISION_TIMEOUT_SEC", "13.0"))
+AI_HTTP_TIMEOUT_MS = int(os.getenv("AI_HTTP_TIMEOUT_MS", "10000"))
 AI_MAX_SCHEMA_RETRIES = int(os.getenv("AI_MAX_SCHEMA_RETRIES", "1"))
 AI_RETRY_ATTEMPTS = int(os.getenv("AI_RETRY_ATTEMPTS", "2"))
 AI_RETRY_BASE_MS = int(os.getenv("AI_RETRY_BASE_MS", "150"))

@@ -83,6 +83,7 @@ class TestFase1Fixes(unittest.TestCase):
             # Mismo arquetipo pero distinto hand_tier -> NO debe dar falso positivo
             false_pos_2 = mem.buscar_errores_similares("D", "SECO", "MANIAC")
             self.assertEqual(len(false_pos_2), 0)
+            mem.close()
 
     def test_03_formatear_perfiles_multijugador_y_unico(self):
         dom_multi = {

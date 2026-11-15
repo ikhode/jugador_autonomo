@@ -1,15 +1,10 @@
-# Entornos y perfiles del navegador
+# Logs temporales pesados y bases de datos locales
+logs/
 browser_profile/
 __pycache__/
 *.pyc
 *.pyo
 .env
-
-# Logs temporales pesados de red
-logs/websocket_traffic.log
-logs/live_table_state.json
-logs/*.png
-logs/*.jpg
 
 # Archivos de la IDE y MacOS
 .vscode/

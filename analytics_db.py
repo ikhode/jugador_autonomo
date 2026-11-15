@@ -1259,6 +1259,78 @@ class AnalyticsStorage:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def consultar_patrones_decisiones_live(
+        self,
+        street: str = "PREFLOP",
+        position: str = "BTN",
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Consulta en tiempo real (runtime) el historial de decisiones previas en la BD
+        para alimentar la inferencia del agente con conocimiento empírico en vivo.
+        """
+        street_clean = (street or "PREFLOP").upper().strip()
+        pos_clean = (position or "BTN").upper().strip()
+
+        with get_connection(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    decision_uid, street, position, hole_cards, board,
+                    action_taken, gto_recommended_action, ev_taken_chips,
+                    ev_best_chips, ev_lost_bb, decision_quality, is_strategic_error,
+                    timestamp, ev_by_action_json
+                FROM analytics_decisions
+                WHERE street = ? AND (position = ? OR position = 'DESCONOCIDA' OR ? = 'DESCONOCIDA')
+                ORDER BY timestamp DESC
+                LIMIT 30
+                """,
+                (street_clean, pos_clean, pos_clean),
+            ).fetchall()
+
+            if not rows:
+                return {
+                    "sample_size": 0,
+                    "action_counts": {},
+                    "avg_ev_lost_bb": 0.0,
+                    "strategic_errors": 0,
+                    "recent_decisions": [],
+                }
+
+            decisions = [dict(r) for r in rows]
+            action_counts: Dict[str, int] = {}
+            total_lost_bb = 0.0
+            error_count = 0
+
+            for d in decisions:
+                act = str(d.get("action_taken") or "WAIT").upper()
+                action_counts[act] = action_counts.get(act, 0) + 1
+                total_lost_bb += float(d.get("ev_lost_bb") or 0.0)
+                if d.get("is_strategic_error"):
+                    error_count += 1
+
+            sample_size = len(decisions)
+            recent_sample = []
+            for d in decisions[:limit]:
+                recent_sample.append({
+                    "street": d.get("street"),
+                    "position": d.get("position"),
+                    "cards": d.get("hole_cards"),
+                    "board": d.get("board"),
+                    "action_taken": d.get("action_taken"),
+                    "gto_action": d.get("gto_recommended_action"),
+                    "ev_lost_bb": round(float(d.get("ev_lost_bb") or 0.0), 2),
+                    "quality": d.get("decision_quality"),
+                })
+
+            return {
+                "sample_size": sample_size,
+                "action_counts": action_counts,
+                "avg_ev_lost_bb": round(total_lost_bb / sample_size, 3) if sample_size > 0 else 0.0,
+                "strategic_errors": error_count,
+                "recent_decisions": recent_sample,
+            }
+
     # ------------------------------------------------------------------
     # EXPORTACIÓN Y TRAZABILIDAD COMPLETA (FASE 7)
     # ------------------------------------------------------------------

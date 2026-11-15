@@ -1014,8 +1014,8 @@ def actualizar_dom_data_conservando_contexto(
         tier = dom_data["gto_preflop"].get("tier", "DESCONOCIDO")
         textura = dom_data["gto_textura"].get("textura_mesa", "DESCONOCIDA")
         arquetipo = (dom_data.get("perfil_rival") or {}).get("estilo", "Desconocido")
+        calle_act = getattr(tracker_obj, "current_street", "") if tracker_obj is not None else str(dom_data.get("street") or "PREFLOP")
         try:
-            calle_act = getattr(tracker_obj, "current_street", "") if tracker_obj is not None else str(dom_data.get("street") or "")
             dom_data["memoria_errores"] = memory_obj.buscar_errores_similares(
                 hand_tier=tier,
                 board_texture=textura,
@@ -1026,6 +1026,17 @@ def actualizar_dom_data_conservando_contexto(
             )
         except Exception:
             dom_data.setdefault("memoria_errores", [])
+
+        try:
+            from analytics_db import AnalyticsStorage
+            storage = getattr(analytics_logger, "storage", None) if 'analytics_logger' in globals() and analytics_logger is not None else AnalyticsStorage()
+            dom_data["patrones_decisiones_live"] = storage.consultar_patrones_decisiones_live(
+                street=calle_act,
+                position=posicion,
+                limit=3,
+            )
+        except Exception:
+            dom_data.setdefault("patrones_decisiones_live", {})
 
     return dom_data
 
@@ -1274,7 +1285,7 @@ def consultar_gemini_con_timeout(
     agent,
     screenshot_bytes,
     dom_data,
-    timeout_seg: float = 8.0,
+    timeout_seg: float = 13.0,
     decision_uid: str = "",
     hand_uid: str = "",
 ) -> Optional[PokerDecision]:
@@ -2379,21 +2390,23 @@ def main():
                                 motor_dec = decidir_accion_rapida(dom_data)
                                 ev_res = decidir_por_ev(dom_data)
                                 llm_dec = None
+                                timeout_cfg = float(getattr(config, "AI_DECISION_TIMEOUT_SEC", 13.0))
                                 try:
-                                    llm_dec = consultar_gemini_con_timeout(agent, screenshot_bytes, dom_data=dom_data, timeout_seg=4.5)
+                                    llm_dec = consultar_gemini_con_timeout(agent, screenshot_bytes, dom_data=dom_data, timeout_seg=timeout_cfg)
                                 except Exception as e:
                                     print(f"⚠️ Excepción al consultar LLM en modo híbrido: {e}")
                                 decision, reg_hib = resolver_decision_hibrida(dom_data, motor_dec, ev_res, llm_dec)
                                 decision_source = "hibrido_llm" if reg_hib.get("aceptada_llm") else "hibrido_motor"
                                 print(f"⚖️ [HÍBRIDO] {reg_hib.get('razon')}")
                             else:
-                                print("🤖 Consultando a Gemini AI (1 consulta única, timeout máx 4.5s)...")
+                                timeout_cfg = float(getattr(config, "AI_DECISION_TIMEOUT_SEC", 13.0))
+                                print(f"🤖 Consultando a Gemini / IA (1 consulta única, timeout máx {timeout_cfg:.1f}s)...")
                                 try:
                                     decision = consultar_gemini_con_timeout(
                                         agent,
                                         screenshot_bytes,
                                         dom_data=dom_data,
-                                        timeout_seg=float(getattr(config, "AI_DECISION_TIMEOUT_SEC", 4.5)),
+                                        timeout_seg=timeout_cfg,
                                         decision_uid=f"dec_{tracker.hand_number}_{ciclo}",
                                         hand_uid=f"hand_{tracker.hand_number}",
                                     )

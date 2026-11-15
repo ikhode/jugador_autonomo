@@ -290,6 +290,27 @@ def render_prompt(dom_data: Optional[dict], prompt_version: str, perfil_rival_st
             )
         memoria_str = "\n".join(lines)
 
+    patrones_live = dom.get("patrones_decisiones_live") or {}
+    patrones_db_str = ""
+    if isinstance(patrones_live, dict) and patrones_live.get("sample_size", 0) > 0:
+        sz = patrones_live["sample_size"]
+        counts = patrones_live.get("action_counts", {})
+        counts_str = ", ".join(f"{k}: {v}" for k, v in counts.items())
+        avg_reg = patrones_live.get("avg_ev_lost_bb", 0.0)
+        recents = patrones_live.get("recent_decisions", [])
+        lines_pat = ["📊 RETRIEVAL EN RUNTIME (HISTORIAL DE DECISIONES EN BD EN VIVO):"]
+        lines_pat.append(f"- Muestra previa en spots similares: {sz} decisiones | Frecuencias: {counts_str} | Regret medio: {avg_reg:+.2f} BB")
+        if recents:
+            lines_pat.append("- Decisiones recientes en este spot:")
+            for r in recents:
+                lines_pat.append(
+                    f"  * [{r.get('cards', '')} | {r.get('board', '')}]: Tomó '{r.get('action_taken')}' "
+                    f"(GTO recomendó '{r.get('gto_action')}', ΔEV: {r.get('ev_lost_bb'):+.2f} BB)"
+                )
+        patrones_db_str = "\n".join(lines_pat)
+
+    memoria_completa_str = "\n".join(filter(None, [memoria_str, patrones_db_str]))
+
     hist = dom.get("historial_mano", "")
     historial_section = f"\nHISTORIAL DE LA MANO:\n{hist}\n" if hist else ""
 
@@ -300,7 +321,7 @@ def render_prompt(dom_data: Optional[dict], prompt_version: str, perfil_rival_st
         textura_str=textura_str,
         frecuencia_str=frecuencia_str,
         perfil_rival_str=perfil_rival_str,
-        memoria_str=memoria_str,
+        memoria_str=memoria_completa_str,
         historial_section=historial_section,
     )
     return ver, digest, rendered
@@ -398,9 +419,46 @@ class AILayer:
             self._genkit_app = None
             self._genkit_flow = None
 
+    def _invoke_cloudflare_ai(self, model_alias: str, contents: List[Any], timeout_sec: float) -> Tuple[str, Optional[int], Optional[int]]:
+        import urllib.request
+        import json
+        account_id = getattr(config, "CF_ACCOUNT_ID", "ac96116c5db82e232d04042b84c09399")
+        token = getattr(config, "CF_API_TOKEN", "")
+        cf_model = "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b" if "deepseek" in model_alias else "@cf/meta/llama-3.1-8b-instruct-fp8"
+        url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{cf_model}"
+
+        prompt_text = " ".join([str(c) for c in contents if isinstance(c, str)])
+        payload = {
+            "messages": [
+                {"role": "system", "content": "Eres un motor GTO de póker. Responde únicamente en JSON válido con las llaves: evaluacion, estrategia_competitiva, estado_pantalla, es_mi_turno, accion, monto_apuesta, confianza."},
+                {"role": "user", "content": prompt_text}
+            ],
+            "max_tokens": 300,
+            "temperature": 0.1
+        }
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            raw = data.get("result", {}).get("response", "")
+            if "<think>" in raw and "</think>" in raw:
+                raw = raw.split("</think>")[-1].strip()
+            usage = data.get("result", {}).get("usage", {})
+            return raw, usage.get("prompt_tokens"), usage.get("completion_tokens")
+
     def _invoke_provider(self, model_name: str, contents: List[Any], timeout_sec: float) -> Tuple[str, Optional[int], Optional[int]]:
         if self._model_callable is not None:
             return self._model_callable(model_name, contents, timeout_sec)
+
+        if str(model_name).startswith("cf-") or "llama" in str(model_name) or "deepseek" in str(model_name):
+            try:
+                return self._invoke_cloudflare_ai(model_name, contents, timeout_sec)
+            except Exception as e:
+                logger.warning("Error invocando Cloudflare Workers AI (%s): %s", model_name, e)
+                raise
 
         assert self._client is not None
         gen_config_kwargs: Dict[str, Any] = {
@@ -411,11 +469,20 @@ class AILayer:
         if hasattr(types, "ThinkingConfig"):
             gen_config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
 
-        response = self._client.models.generate_content(
-            model=model_name,
-            contents=contents,
-            config=types.GenerateContentConfig(**gen_config_kwargs),
-        )
+        # Timeout acotado por llamada a 6.0s para conmutar a Cloudflare Workers AI si Gemini tarda
+        call_timeout = min(6.0, max(1.5, timeout_sec)) if timeout_sec > 1.5 else timeout_sec
+
+        def _do_gemini_call():
+            return self._client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(**gen_config_kwargs),
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_do_gemini_call)
+            response = future.result(timeout=call_timeout)
+
         raw_text = (getattr(response, "text", None) or "").strip()
         usage = getattr(response, "usage_metadata", None)
         t_in = getattr(usage, "prompt_token_count", None) if usage else None
@@ -446,7 +513,7 @@ class AILayer:
     ) -> AIDecisionResult:
         """Ejecuta el flujo instrumentado decidir_accion y garantiza respuesta segura."""
         t_start = time.perf_counter()
-        budget_sec = float(timeout_sec or getattr(config, "AI_DECISION_TIMEOUT_SEC", 4.5))
+        budget_sec = float(timeout_sec or getattr(config, "AI_DECISION_TIMEOUT_SEC", 13.0))
         deadline = t_start + budget_sec
         uid = decision_uid or uuid.uuid4().hex[:24]
 

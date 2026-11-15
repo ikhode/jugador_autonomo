@@ -368,3 +368,16 @@ class PokerExperienceMemory:
                         for r in top
                     ],
                 }
+
+    def close(self) -> None:
+        """Cierra el pool de conexiones SQLite de la memoria de experiencia."""
+        with self._lock:
+            if hasattr(self, "_engine") and self._engine:
+                try:
+                    self._engine.dispose()
+                except Exception:
+                    pass
+
+    def dispose(self) -> None:
+        self.close()
+
