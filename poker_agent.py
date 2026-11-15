@@ -296,7 +296,7 @@ def consultar_gemma_local(prompt: str, dom_data: Optional[dict] = None) -> Optio
     if not llm:
         return None
     try:
-        sys_prompt = "Eres un bot profesional de póker GTO. Responde estrictamente en formato JSON válido con los campos: evaluacion, estrategia_competitiva, estado_pantalla, es_mi_turno, accion, monto_apuesta, confianza."
+        sys_prompt = "Eres un bot profesional de póker GTO. Responde estrictamente en formato JSON válido con los campos: evaluacion, estrategia_competitiva, estado_pantalla, es_mi_turno, accion, monto_apuesta, confianza. IMPORTANTE: 'confianza' debe ser un número decimal float entre 0.0 y 1.0 (ej. 0.85). 'monto_apuesta' debe ser un número entero."
         messages = [
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": prompt}
@@ -316,14 +316,35 @@ def consultar_gemma_local(prompt: str, dom_data: Optional[dict] = None) -> Optio
         if accion not in ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN", "ALLIN", "REPLAY", "START_GAME", "WAIT"):
             accion = "CHECK"
 
+        # Safe parsing of numeric values
+        raw_monto = data.get("monto_apuesta") or data.get("bet_amount") or 0
+        try:
+            monto_val = int(re.sub(r"[^\d]", "", str(raw_monto)) or 0)
+        except Exception:
+            monto_val = 0
+
+        raw_conf = str(data.get("confianza") or "0.85").strip().lower()
+        if "alta" in raw_conf or "high" in raw_conf:
+            conf_val = 0.90
+        elif "media" in raw_conf or "medium" in raw_conf:
+            conf_val = 0.70
+        elif "baja" in raw_conf or "low" in raw_conf:
+            conf_val = 0.50
+        else:
+            try:
+                match = re.search(r"0?\.\d+|1\.0|0|1", raw_conf)
+                conf_val = float(match.group(0)) if match else 0.85
+            except Exception:
+                conf_val = 0.85
+
         decision = PokerDecision(
             evaluacion=str(data.get("evaluacion") or data.get("reasoning") or "Evaluación Gemma 4B Local"),
             estrategia_competitiva=str(data.get("estrategia_competitiva") or "Juego local GTO Gemma"),
             estado_pantalla="EN_MESA_JUEGO",
             es_mi_turno=True,
             accion=accion,
-            monto_apuesta=int(data.get("monto_apuesta") or data.get("bet_amount") or 0),
-            confianza=float(data.get("confianza") or 0.85)
+            monto_apuesta=monto_val,
+            confianza=conf_val
         )
 
         opciones_dom = str((dom_data or {}).get("opciones_disponibles", "") or (dom_data or {}).get("botones_visibles", "")).upper()
