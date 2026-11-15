@@ -1,5 +1,5 @@
 {
-  "exported_at": "2026-11-15 01:38:34",
+  "exported_at": "2026-11-15 01:39:11",
   "traceability": {
     "code_hash": "7ede52c9a082ad83",
     "db_path": "logs\\poker_stats.db",
@@ -172,7 +172,7 @@
       "modified_params": "{}",
       "parent_version": "1.2",
       "config_hash": "bfd64a71fdd7",
-      "code_hash": "1ea131c9a089654c",
+      "code_hash": "7ede52c9a082ad83",
       "random_seed": 20261114,
       "experiment_conditions": "{}",
       "notes": "Motor completo actual: distingue Pocket Pair/Set oculto de Board Pair pública, usa blockers de As/Rey y sizings 33%/66%/100%.",
@@ -576,21 +576,38 @@
   ],
   "sessions": [
     {
+      "session_id": "ses_20261115_013910_a7ed3b",
+      "version_id": "1.3",
+      "started_at": "2026-11-15 01:39:10",
+      "ended_at": null,
+      "mode": "live",
+      "is_synthetic": 0,
+      "code_hash": "7ede52c9a082ad83",
+      "model_name": "gemini-2.5-flash",
+      "initial_bankroll": 1500.0,
+      "final_bankroll": 1500.0,
+      "buy_in_total": 500.0,
+      "big_blind": 20.0,
+      "hands_played": 0,
+      "net_profit_chips": 0.0,
+      "status": "ACTIVE"
+    },
+    {
       "session_id": "ses_20261115_010503_021225",
       "version_id": "1.3",
       "started_at": "2026-11-15 01:05:03",
-      "ended_at": "2026-11-15 01:38:33",
+      "ended_at": "2026-11-15 01:39:04",
       "mode": "live",
       "is_synthetic": 0,
       "code_hash": "1ea131c9a089654c",
       "model_name": "gemini-2.5-flash",
       "initial_bankroll": 1500.0,
-      "final_bankroll": 4396.0,
+      "final_bankroll": 4296.0,
       "buy_in_total": 500.0,
       "big_blind": 20.0,
-      "hands_played": 134,
-      "net_profit_chips": 2896.0,
-      "status": "ACTIVE"
+      "hands_played": 135,
+      "net_profit_chips": 2796.0,
+      "status": "COMPLETED"
     },
     {
       "session_id": "ses_20261115_010326_dbd8e8",
@@ -969,62 +986,62 @@
   ],
   "summary": {
     "general_performance": {
-      "hands_played": 615,
-      "live_hands_played": 135,
+      "hands_played": 616,
+      "live_hands_played": 136,
       "benchmark_hands_played": 480,
       "sessions_count": 10,
       "hands_won": 178,
-      "hands_lost": 307,
+      "hands_lost": 308,
       "hands_pushed": 130,
-      "win_pct": 28.94,
+      "win_pct": 28.9,
       "win_pct_ci95": [
-        25.5,
-        32.65
+        25.46,
+        32.6
       ],
       "gross_won_chips": 33451.0,
-      "gross_lost_chips": -32151.0,
+      "gross_lost_chips": -32251.0,
       "gross_won_bb": 1672.55,
-      "gross_lost_bb": -1607.55,
-      "net_profit_chips": 1300.0,
-      "net_profit_bb": 65.0,
-      "ev_net_chips": 6548.81,
-      "ev_net_bb": 327.45,
-      "allin_ev_chips": 2668.74,
-      "allin_ev_bb": 133.44,
-      "allin_hands_count": 272,
-      "roi_pct": 7.71,
-      "ev_roi_pct": 38.85,
+      "gross_lost_bb": -1612.55,
+      "net_profit_chips": 1200.0,
+      "net_profit_bb": 60.0,
+      "ev_net_chips": 6987.27,
+      "ev_net_bb": 349.37,
+      "allin_ev_chips": 3185.24,
+      "allin_ev_bb": 159.27,
+      "allin_hands_count": 273,
+      "roi_pct": 7.11,
+      "ev_roi_pct": 41.39,
       "roi_applicable": true,
-      "investment_base_chips": 16857.38,
+      "investment_base_chips": 16882.38,
       "initial_bankroll_chips": 1500.0,
-      "final_bankroll_chips": 2800.0,
-      "ev_final_bankroll_chips": 8048.81,
-      "bb_per_100": 10.57,
+      "final_bankroll_chips": 2700.0,
+      "ev_final_bankroll_chips": 8487.27,
+      "bb_per_100": 9.74,
       "bb_per_100_ci95": [
-        -62.4,
-        83.54
+        -63.13,
+        82.61
       ],
-      "ev_bb_per_100": 53.24,
+      "ev_bb_per_100": 56.72,
       "ev_bb_per_100_ci95": [
-        12.82,
-        93.67
+        15.78,
+        97.65
       ],
-      "allin_ev_bb_per_100": 21.7,
+      "allin_ev_bb_per_100": 25.86,
       "allin_ev_bb_per_100_ci95": [
-        -23.44,
-        66.84
+        -19.95,
+        71.66
       ],
-      "avg_profit_per_hand_chips": 2.11,
-      "avg_profit_per_hand_bb": 0.106,
-      "std_bb_per_hand": 9.215,
-      "std_bb_per_100": 92.15,
-      "variance_bb_per_hand": 84.9171,
-      "variance_bb_per_100": 8491.71,
+      "avg_profit_per_hand_chips": 1.95,
+      "avg_profit_per_hand_bb": 0.097,
+      "std_bb_per_hand": 9.2098,
+      "std_bb_per_100": 92.1,
+      "variance_bb_per_hand": 84.8213,
+      "variance_bb_per_100": 8482.13,
       "max_drawdown_chips": 4782.0,
       "max_drawdown_bb": 239.1,
-      "sharpe_ratio_100": 0.578,
+      "sharpe_ratio_100": 0.616,
       "sharpe_assumptions_met": true,
-      "sharpe_status_note": "Supuestos válidos (n = 615 >= 30, σ = 9.21 BB/mano > 0).",
+      "sharpe_status_note": "Supuestos válidos (n = 616 >= 30, σ = 9.21 BB/mano > 0).",
       "bankroll_curve": [
         {
           "hand_index": 1,
@@ -11480,35 +11497,52 @@
           "cumulative_allin_ev_bb100": 21.7,
           "rolling_bb100": -56.0,
           "drawdown_bb": 26.0
+        },
+        {
+          "hand_index": 616,
+          "hand_uid": "515ed89e50be1589cf171c65",
+          "version_id": "1.3",
+          "date_str": "2026-11-15",
+          "bankroll_real": 2700.0,
+          "bankroll_ev": 8487.27,
+          "bankroll_allin_ev": 4685.24,
+          "cumulative_bb": 60.0,
+          "cumulative_ev_bb": 349.37,
+          "cumulative_allin_ev_bb": 159.27,
+          "cumulative_bb100": 9.74,
+          "cumulative_ev_bb100": 56.72,
+          "cumulative_allin_ev_bb100": 25.86,
+          "rolling_bb100": 24.0,
+          "drawdown_bb": 31.0
         }
       ]
     },
     "gameplay_hud": {
-      "vpip_pct": 43.25,
-      "pfr_pct": 17.07,
-      "vpip_pfr_gap_pct": 26.18,
-      "three_bet_pct": 7.07,
+      "vpip_pct": 43.34,
+      "pfr_pct": 17.05,
+      "vpip_pfr_gap_pct": 26.29,
+      "three_bet_pct": 7.03,
       "fold_to_three_bet_pct": 85.71,
       "aggression_factor": 0.67,
       "postflop_aggression_factor": 0.67,
-      "aggression_frequency_pct": 34.98,
-      "wtsd_pct": 70.45,
-      "wsd_pct": 48.69,
-      "wwsf_pct": 41.16,
+      "aggression_frequency_pct": 35.08,
+      "wtsd_pct": 70.53,
+      "wsd_pct": 48.51,
+      "wwsf_pct": 41.05,
       "cbet_flop_pct": 34.09,
       "fold_to_cbet_pct": 34.51,
       "definitions_table": [
         {
           "metric_id": "VPIP",
           "name": "VPIP (Voluntarily Put Money In Pot)",
-          "value": 43.25,
+          "value": 43.34,
           "unit": "%",
-          "numerator": 266,
-          "denominator": 615,
-          "sample_size": 615,
+          "numerator": 267,
+          "denominator": 616,
+          "sample_size": 616,
           "ci95": [
-            39.39,
-            47.2
+            39.48,
+            47.29
           ],
           "formula": "(Manos con Call/Bet/Raise voluntario preflop / Total manos jugadas) × 100",
           "definition": "Porcentaje de manos en las que el bot invierte fichas voluntariamente preflop (excluyendo ciegas obligatorias).",
@@ -11517,14 +11551,14 @@
         {
           "metric_id": "PFR",
           "name": "PFR (Preflop Raise)",
-          "value": 17.07,
+          "value": 17.05,
           "unit": "%",
           "numerator": 105,
-          "denominator": 615,
-          "sample_size": 615,
+          "denominator": 616,
+          "sample_size": 616,
           "ci95": [
-            14.31,
-            20.25
+            14.28,
+            20.22
           ],
           "formula": "(Manos con subida/all-in preflop / Total manos jugadas) × 100",
           "definition": "Porcentaje de manos en las que el bot entra o continúa preflop mediante una acción agresiva (Raise / 3-Bet / All-in).",
@@ -11533,14 +11567,14 @@
         {
           "metric_id": "3BET",
           "name": "3-Bet Preflop",
-          "value": 7.07,
+          "value": 7.03,
           "unit": "%",
           "numerator": 13,
-          "denominator": 184,
-          "sample_size": 184,
+          "denominator": 185,
+          "sample_size": 185,
           "ci95": [
-            4.18,
-            11.71
+            4.15,
+            11.65
           ],
           "formula": "(Manos con re-subida preflop / Oportunidades de 3-Bet ante Open-Raise rival) × 100",
           "definition": "Frecuencia con la que el bot re-sube preflop cuando enfrenta una subida previa del oponente.",
@@ -11567,9 +11601,9 @@
           "name": "Aggression Factor (AF Postflop)",
           "value": 0.67,
           "unit": "ratio",
-          "numerator": 227,
+          "numerator": 228,
           "denominator": 341,
-          "sample_size": 568,
+          "sample_size": 569,
           "ci95": [
             0.67,
             0.67
@@ -11581,14 +11615,14 @@
         {
           "metric_id": "AFQ",
           "name": "Aggression Frequency (AFq%)",
-          "value": 34.98,
+          "value": 35.08,
           "unit": "%",
-          "numerator": 227,
-          "denominator": 649,
-          "sample_size": 649,
+          "numerator": 228,
+          "denominator": 650,
+          "sample_size": 650,
           "ci95": [
-            31.41,
-            38.72
+            31.51,
+            38.82
           ],
           "formula": "((Bets + Raises) / (Bets + Raises + Calls + Folds)) × 100",
           "definition": "Proporción de decisiones no-check en las que el bot toma la iniciativa apostando o subiendo.",
@@ -11597,14 +11631,14 @@
         {
           "metric_id": "WTSD",
           "name": "WTSD (Went to Showdown)",
-          "value": 70.45,
+          "value": 70.53,
           "unit": "%",
-          "numerator": 267,
-          "denominator": 379,
-          "sample_size": 379,
+          "numerator": 268,
+          "denominator": 380,
+          "sample_size": 380,
           "ci95": [
-            65.67,
-            74.82
+            65.76,
+            74.89
           ],
           "formula": "(Manos que llegaron al Showdown / Manos que vieron el Flop) × 100",
           "definition": "Porcentaje de veces que el bot llega hasta el Showdown tras haber visto el Flop.",
@@ -11613,14 +11647,14 @@
         {
           "metric_id": "WSD",
           "name": "W$SD (Won Money at Showdown)",
-          "value": 48.69,
+          "value": 48.51,
           "unit": "%",
           "numerator": 130,
-          "denominator": 267,
-          "sample_size": 267,
+          "denominator": 268,
+          "sample_size": 268,
           "ci95": [
-            42.75,
-            54.66
+            42.59,
+            54.47
           ],
           "formula": "(Manos ganadas en el Showdown / Total de Showdowns jugados) × 100",
           "definition": "Efectividad del bot al mostrar cartas en el Showdown.",
@@ -11629,14 +11663,14 @@
         {
           "metric_id": "WWSF",
           "name": "WWSF (Won When Saw Flop)",
-          "value": 41.16,
+          "value": 41.05,
           "unit": "%",
           "numerator": 156,
-          "denominator": 379,
-          "sample_size": 379,
+          "denominator": 380,
+          "sample_size": 380,
           "ci95": [
-            36.32,
-            46.18
+            36.22,
+            46.06
           ],
           "formula": "(Manos ganadas habiendo visto el Flop / Total manos que vieron el Flop) × 100",
           "definition": "Capacidad de lucha por los botes postflop (tanto por derribo como en showdown).",
@@ -11822,83 +11856,83 @@
         },
         {
           "block_index": 13,
-          "hand_range": "613-615",
+          "hand_range": "613-616",
           "version_id": "1.3",
-          "hands_in_block": 3,
-          "vpip_pct": 33.3,
-          "pfr_pct": 33.3,
-          "three_bet_pct": 50.0,
+          "hands_in_block": 4,
+          "vpip_pct": 50.0,
+          "pfr_pct": 25.0,
+          "three_bet_pct": 33.3,
           "cbet_flop_pct": 0.0,
-          "wtsd_pct": 0.0,
+          "wtsd_pct": 100.0,
           "wsd_pct": 0.0
         }
       ],
       "counts": {
-        "hands": 615,
-        "vpip": 266,
+        "hands": 616,
+        "vpip": 267,
         "pfr": 105,
-        "three_bet_opps": 184,
+        "three_bet_opps": 185,
         "three_bet": 13,
         "faced_3bet": 35,
         "fold_to_3bet": 30,
-        "saw_flop": 379,
-        "wtsd": 267,
+        "saw_flop": 380,
+        "wtsd": 268,
         "wsd": 130,
         "wwsf": 156,
         "cbet_opps": 88,
         "cbet": 30,
         "faced_cbet": 142,
         "fold_to_cbet": 49,
-        "postflop_aggr": 227,
+        "postflop_aggr": 228,
         "postflop_calls": 341,
-        "postflop_non_check": 649
+        "postflop_non_check": 650
       }
     },
     "statistical_evaluation": {
-      "sample_size": 615,
+      "sample_size": 616,
       "sample_status": "MUESTRA_SOLIDA",
       "sample_sufficient": true,
-      "sample_alert": "🏆 Muestra sólida (615 manos). Alta confiabilidad estadística tanto en EV como en Winrate.",
+      "sample_alert": "🏆 Muestra sólida (616 manos). Alta confiabilidad estadística tanto en EV como en Winrate.",
       "observed_metrics": {
-        "net_profit_bb": 65.0,
-        "winrate_bb100": 10.57,
-        "winrate_se_bb100": 37.16,
-        "winrate_ci95_low": -62.4,
-        "winrate_ci95_high": 83.54,
-        "std_bb_per_hand": 9.215,
-        "std_bb_per_100": 92.15,
-        "variance_bb_per_hand": 84.9171,
+        "net_profit_bb": 60.0,
+        "winrate_bb100": 9.74,
+        "winrate_se_bb100": 37.11,
+        "winrate_ci95_low": -63.13,
+        "winrate_ci95_high": 82.61,
+        "std_bb_per_hand": 9.2098,
+        "std_bb_per_100": 92.1,
+        "variance_bb_per_hand": 84.8213,
         "max_drawdown_bb": 239.1,
         "max_drawdown_chips": 4782.0
       },
       "gto_ev_estimates": {
-        "ev_net_bb": 327.45,
-        "allin_ev_bb": 133.44,
-        "ev_winrate_bb100": 53.24,
-        "ev_winrate_se_bb100": 20.58,
-        "ev_winrate_ci95_low": 12.82,
-        "ev_winrate_ci95_high": 93.67,
-        "allin_ev_bb100": 21.7,
-        "allin_ev_ci95_low": -23.44,
-        "allin_ev_ci95_high": 66.84,
-        "gto_alignment_pct": 82.6,
+        "ev_net_bb": 349.37,
+        "allin_ev_bb": 159.27,
+        "ev_winrate_bb100": 56.72,
+        "ev_winrate_se_bb100": 20.84,
+        "ev_winrate_ci95_low": 15.78,
+        "ev_winrate_ci95_high": 97.65,
+        "allin_ev_bb100": 25.86,
+        "allin_ev_ci95_low": -19.95,
+        "allin_ev_ci95_high": 71.66,
+        "gto_alignment_pct": 82.56,
         "gto_alignment_ci95": [
-          80.65,
-          84.4
+          80.61,
+          84.35
         ]
       },
       "variance_analysis": {
-        "luck_diff_bb": -262.45,
-        "luck_diff_bb100": -42.67,
+        "luck_diff_bb": -289.37,
+        "luck_diff_bb100": -46.98,
         "variance_state": "VARIANZA_NEGATIVA_BAD_BEATS",
-        "variance_explanation": "El bot está corriendo -42.67 BB/100 por debajo de su EV esperado (varianza adversa / bad beats). La calidad de las decisiones es superior a lo que refleja el beneficio neto."
+        "variance_explanation": "El bot está corriendo -46.98 BB/100 por debajo de su EV esperado (varianza adversa / bad beats). La calidad de las decisiones es superior a lo que refleja el beneficio neto."
       },
       "stability_indicators": {
-        "sharpe_ratio_100": 0.578,
+        "sharpe_ratio_100": 0.616,
         "sharpe_assumptions_met": true,
-        "sharpe_status_note": "Supuestos válidos (n = 615 >= 30, σ = 9.21 BB/mano > 0).",
+        "sharpe_status_note": "Supuestos válidos (n = 616 >= 30, σ = 9.21 BB/mano > 0).",
         "positive_ev_windows_pct": 63.3,
-        "stability_score": 68.2
+        "stability_score": 68.5
       }
     },
     "version_comparison": {
@@ -12299,42 +12333,42 @@
           "parent_version": "1.2",
           "modified_params": {},
           "config_hash": "bfd64a71fdd7",
-          "code_hash": "1ea131c9a089654c",
+          "code_hash": "7ede52c9a082ad83",
           "random_seed": 20261114,
           "experiment_conditions": {},
-          "hands_evaluated": 255,
-          "decisions_evaluated": 540,
+          "hands_evaluated": 256,
+          "decisions_evaluated": 542,
           "is_exploratory_sample": false,
-          "win_pct": 28.24,
-          "vpip_pct": 34.12,
-          "pfr_pct": 17.25,
-          "net_profit_chips": 5532.0,
-          "net_profit_bb": 276.6,
-          "ev_net_bb": 427.18,
-          "bb_per_100": 108.47,
+          "win_pct": 28.12,
+          "vpip_pct": 34.38,
+          "pfr_pct": 17.19,
+          "net_profit_chips": 5432.0,
+          "net_profit_bb": 271.6,
+          "ev_net_bb": 449.11,
+          "bb_per_100": 106.09,
           "bb_per_100_ci95": [
-            -17.05,
-            233.99
+            -19.02,
+            231.21
           ],
-          "ev_bb_per_100": 167.52,
+          "ev_bb_per_100": 175.43,
           "ev_bb_per_100_ci95": [
-            86.84,
-            248.2
+            93.57,
+            257.29
           ],
-          "gto_alignment_pct": 82.96,
-          "strategic_error_rate_pct": 5.93,
-          "ev_lost_per_100_bb": 121.45,
+          "gto_alignment_pct": 82.84,
+          "strategic_error_rate_pct": 6.09,
+          "ev_lost_per_100_bb": 125.33,
           "adaptation_pct": 99.63,
-          "composite_score": 278.87,
+          "composite_score": 287.12,
           "comparison_vs_prev": {
             "base_version": "1.2",
-            "delta_bb_per_100": 120.89,
-            "delta_ev_bb_per_100": 150.97,
-            "delta_gto_pct": -3.86,
-            "delta_error_rate_pct": -0.18,
-            "delta_ev_lost_per_100_bb": 32.64,
+            "delta_bb_per_100": 118.51,
+            "delta_ev_bb_per_100": 158.88,
+            "delta_gto_pct": -3.98,
+            "delta_error_rate_pct": -0.02,
+            "delta_ev_lost_per_100_bb": 36.52,
             "delta_adaptation_pct": 3.49,
-            "delta_win_pct": 0.74,
+            "delta_win_pct": 0.62,
             "ci95_ev_diff": [
               11.3,
               112.66
@@ -12342,15 +12376,15 @@
             "cohens_d": 0.221,
             "welch_real_test": {
               "n_a": 120,
-              "n_b": 255,
-              "t_stat": 1.23,
-              "df": 284.3,
-              "p_value": 0.2197,
-              "cohens_d": 0.126,
-              "delta_scaled": 120.89,
+              "n_b": 256,
+              "t_stat": 1.208,
+              "df": 283.7,
+              "p_value": 0.2282,
+              "cohens_d": 0.124,
+              "delta_scaled": 118.51,
               "ci95_diff": [
-                -72.55,
-                314.33
+                -74.67,
+                311.69
               ],
               "significant_95": false,
               "verdict": "SIN_CAMBIO_SIGNIFICATIVO",
@@ -12358,15 +12392,15 @@
             },
             "welch_ev_test": {
               "n_a": 120,
-              "n_b": 255,
-              "t_stat": 2.957,
-              "df": 370.6,
-              "p_value": 0.0033,
-              "cohens_d": 0.264,
-              "delta_scaled": 150.97,
+              "n_b": 256,
+              "t_stat": 3.082,
+              "df": 372.3,
+              "p_value": 0.0022,
+              "cohens_d": 0.274,
+              "delta_scaled": 158.88,
               "ci95_diff": [
-                50.56,
-                251.38
+                57.53,
+                260.23
               ],
               "significant_95": true,
               "verdict": "MEJORA_SIGNIFICATIVA",
@@ -12389,13 +12423,13 @@
             "holm_corrected_p_value": 0.051,
             "significant_after_holm": false,
             "improved_metrics": [
-              "EV Winrate (+150.97 BB/100)",
-              "Winrate Real (+120.89 BB/100)",
+              "EV Winrate (+158.88 BB/100)",
+              "Winrate Real (+118.51 BB/100)",
               "Adaptación Rival (+3.5%)"
             ],
             "degraded_metrics": [
-              "Alineación GTO (-3.9%)",
-              "EV Perdido (+32.64 BB/100)"
+              "Alineación GTO (-4.0%)",
+              "EV Perdido (+36.52 BB/100)"
             ],
             "unchanged_metrics": [
               "Tasa de Error"
@@ -12404,7 +12438,7 @@
             "verdict_state": "INCONCLUSO",
             "is_exploratory": false,
             "sample_tag": "CONFIRMATORIA (n=120)",
-            "summary": "INCONCLUSO: evidencia insuficiente para rechazar igualdad o tamaño del efecto pequeño (ΔEV = +150.97 BB/100, IC 95%: [+11.30, +112.66], p-Holm = 0.0510, d = +0.22)."
+            "summary": "INCONCLUSO: evidencia insuficiente para rechazar igualdad o tamaño del efecto pequeño (ΔEV = +158.88 BB/100, IC 95%: [+11.30, +112.66], p-Holm = 0.0510, d = +0.22)."
           }
         },
         {
@@ -12443,45 +12477,45 @@
           "composite_score": -0.0,
           "comparison_vs_prev": {
             "base_version": "1.3",
-            "delta_bb_per_100": -108.47,
-            "delta_ev_bb_per_100": -167.52,
-            "delta_gto_pct": -82.96,
-            "delta_error_rate_pct": -5.93,
-            "delta_ev_lost_per_100_bb": -121.45,
+            "delta_bb_per_100": -106.09,
+            "delta_ev_bb_per_100": -175.43,
+            "delta_gto_pct": -82.84,
+            "delta_error_rate_pct": -6.09,
+            "delta_ev_lost_per_100_bb": -125.33,
             "delta_adaptation_pct": -99.63,
-            "delta_win_pct": -28.24,
+            "delta_win_pct": -28.12,
             "ci95_ev_diff": [
-              -167.52,
-              -167.52
+              -175.43,
+              -175.43
             ],
             "cohens_d": 0.0,
             "welch_real_test": {
-              "n_a": 255,
+              "n_a": 256,
               "n_b": 0,
               "t_stat": 0.0,
               "df": 0.0,
               "p_value": 1.0,
               "cohens_d": 0.0,
-              "delta_scaled": -108.47,
+              "delta_scaled": -106.09,
               "ci95_diff": [
-                -108.47,
-                -108.47
+                -106.09,
+                -106.09
               ],
               "significant_95": false,
               "verdict": "INCONCLUSO",
               "verdict_state": "INCONCLUSO"
             },
             "welch_ev_test": {
-              "n_a": 255,
+              "n_a": 256,
               "n_b": 0,
               "t_stat": 0.0,
               "df": 0.0,
               "p_value": 1.0,
               "cohens_d": 0.0,
-              "delta_scaled": -167.52,
+              "delta_scaled": -175.43,
               "ci95_diff": [
-                -167.52,
-                -167.52
+                -175.43,
+                -175.43
               ],
               "significant_95": false,
               "verdict": "INCONCLUSO",
@@ -12492,13 +12526,13 @@
             "holm_corrected_p_value": 1.0,
             "significant_after_holm": false,
             "improved_metrics": [
-              "Tasa de Error (-5.9%)",
-              "EV Perdido (-121.45 BB/100)"
+              "Tasa de Error (-6.1%)",
+              "EV Perdido (-125.33 BB/100)"
             ],
             "degraded_metrics": [
-              "EV Winrate (-167.52 BB/100)",
-              "Winrate Real (-108.47 BB/100)",
-              "Alineación GTO (-83.0%)",
+              "EV Winrate (-175.43 BB/100)",
+              "Winrate Real (-106.09 BB/100)",
+              "Alineación GTO (-82.8%)",
               "Adaptación Rival (-99.6%)"
             ],
             "unchanged_metrics": [],
@@ -12506,7 +12540,7 @@
             "verdict_state": "INCONCLUSO",
             "is_exploratory": true,
             "sample_tag": "EXPLORATORIA (n=0 < 30)",
-            "summary": "Evidencia insuficiente: muestra exploratoria (n_prev=255, n_curr=0 < 30). No se declara MEJORA ni REGRESIÓN hasta alcanzar tamaño muestral suficiente."
+            "summary": "Evidencia insuficiente: muestra exploratoria (n_prev=256, n_curr=0 < 30). No se declara MEJORA ni REGRESIÓN hasta alcanzar tamaño muestral suficiente."
           }
         }
       ],
@@ -12522,14 +12556,14 @@
         "id_diagnostico": "DIAG_VPIP_PFR_GAP",
         "severidad": "CRITICA",
         "problema_detectado": "Brecha excesiva entre VPIP y PFR (tendencia pasiva preflop)",
-        "evidencia_estadistica": "VPIP = 43.2% vs PFR = 17.1% (Brecha = 26.2 puntos porcentuales; rango óptimo en 3-Max/Spin & Go: 5% - 12% sobre n = 615 manos).",
+        "evidencia_estadistica": "VPIP = 43.3% vs PFR = 17.1% (Brecha = 26.3 puntos porcentuales; rango óptimo en 3-Max/Spin & Go: 5% - 12% sobre n = 616 manos).",
         "metricas_afectadas": [
           "VPIP%",
           "PFR%",
           "Iniciativa Postflop (CBet Opps)",
           "WWSF%"
         ],
-        "nivel_confianza": "ALTA (n = 615)",
+        "nivel_confianza": "ALTA (n = 616)",
         "posible_causa": "El agente está igualando (Call/Limp) demasiadas manos marginales preflop en lugar de seleccionar entre Open-Raise/3-Bet o Fold disciplinado.",
         "recomendacion_investigacion": "Revisar los umbrales de `preflop_min_score` en defensa de ciegas (SB/BB) y verificar si el fallback rápido convierte subidas recomendadas en Calls pasivos."
       },
@@ -12537,13 +12571,13 @@
         "id_diagnostico": "DIAG_POS_LEAK_BTN",
         "severidad": "ADVERTENCIA",
         "problema_detectado": "Fuga de rentabilidad (Leak) concentrada en la posición BTN",
-        "evidencia_estadistica": "En BTN (295 manos): EV Winrate = +135.03 BB/100, Winrate Real = +94.47 BB/100, EV perdido acumulado = 353.54 BB (Alineación heurística-GTO: 85.1%).",
+        "evidencia_estadistica": "En BTN (296 manos): EV Winrate = +141.98 BB/100, Winrate Real = +92.47 BB/100, EV perdido acumulado = 364.69 BB (Alineación heurística-GTO: 85.0%).",
         "metricas_afectadas": [
           "EV BB/100 (BTN)",
           "Winrate Real (BTN)",
           "EV Lost BB"
         ],
-        "nivel_confianza": "ALTA (n = 295)",
+        "nivel_confianza": "ALTA (n = 296)",
         "posible_causa": "Defensa demasiado amplia fuera de posición en BTN o pagos postflop fuera de Pot Odds sin ventaja posicional.",
         "recomendacion_investigacion": "Filtrar el Historial de Manos por posición = BTN y auditar las decisiones con mayor Regret (ΔEV) en Flop y Turn."
       },
@@ -12593,7 +12627,7 @@
         "id_diagnostico": "DIAG_VERSION_REGRESSION_1.4",
         "severidad": "CRITICA",
         "problema_detectado": "Deterioro de EV detectado en la versión v1.4 respecto a v1.3",
-        "evidencia_estadistica": "ΔEV = -167.52 BB/100, p-ajustado (Holm-Bonferroni) = 1.0000, Tamaño del efecto d = +0.000 (Estado: INCONCLUSO).",
+        "evidencia_estadistica": "ΔEV = -175.43 BB/100, p-ajustado (Holm-Bonferroni) = 1.0000, Tamaño del efecto d = +0.000 (Estado: INCONCLUSO).",
         "metricas_afectadas": [
           "EV BB/100",
           "Regret Acumulado",
@@ -12606,42 +12640,42 @@
     ],
     "system_reliability": {
       "decision_latency": {
-        "count": 1578,
-        "mean_ms": 198.6196,
+        "count": 1580,
+        "mean_ms": 200.2646,
         "min_ms": 2.627,
-        "p50_ms": 44.694,
-        "p95_ms": 1139.579,
-        "p99_ms": 1360.6848,
+        "p50_ms": 44.695,
+        "p95_ms": 1143.7228,
+        "p99_ms": 1381.3252,
         "max_ms": 4550.505
       },
       "enqueue_latency": {
-        "count": 1875,
-        "mean_ms": 0.176,
+        "count": 1879,
+        "mean_ms": 0.1756,
         "min_ms": 0.0091,
-        "p50_ms": 0.1897,
-        "p95_ms": 0.3761,
-        "p99_ms": 0.5018,
+        "p50_ms": 0.1896,
+        "p95_ms": 0.3759,
+        "p99_ms": 0.5011,
         "max_ms": 1.0239
       },
       "sqlite_write_latency": {
-        "count": 1875,
-        "mean_ms": 0.6451,
+        "count": 1879,
+        "mean_ms": 0.6472,
         "min_ms": 0.0684,
         "p50_ms": 0.35,
-        "p95_ms": 2.3299,
-        "p99_ms": 3.0274,
+        "p95_ms": 2.3425,
+        "p99_ms": 3.0474,
         "max_ms": 16.4901
       },
       "stat_processing_latency": {
         "count": 1,
-        "mean_ms": 225.105,
-        "min_ms": 225.105,
-        "p50_ms": 225.105,
-        "p95_ms": 225.105,
-        "p99_ms": 225.105,
-        "max_ms": 225.105
+        "mean_ms": 217.496,
+        "min_ms": 217.496,
+        "p50_ms": 217.496,
+        "p95_ms": 217.496,
+        "p99_ms": 217.496,
+        "max_ms": 217.496
       },
-      "memory_rss_mb": 358.45,
+      "memory_rss_mb": 172.51,
       "storage_errors_total": 0,
       "dropped_records_total": 0,
       "max_pending_queue_tasks": 0,
@@ -12654,21 +12688,21 @@
         "db_size_kb": 2000.0,
         "code_hash": "7ede52c9a082ad83",
         "counts": {
-          "live_hands": 135,
+          "live_hands": 136,
           "benchmark_hands": 480,
-          "live_decisions": 246,
+          "live_decisions": 248,
           "benchmark_decisions": 1332,
           "opponents_profiled": 1,
           "versions_registered": 5,
           "experiments_registered": 4,
-          "telemetry_events": 297
+          "telemetry_events": 299
         }
       },
       "latency_methodology_note": "Mediciones empíricas con reloj monotónico de alta resolución (time.perf_counter_ns). El hilo principal del bot solo incurre en la latencia de encolado (enqueue_latency_ms), mientras que la escritura SQLite ocurre en el worker secundario con drenado garantizado al cierre."
     }
   },
-  "hands_count": 615,
-  "decisions_count": 1578,
+  "hands_count": 616,
+  "decisions_count": 1580,
   "hands": [
     {
       "hand_uid": "h_v1_0_SCEN_0001",
@@ -46494,6 +46528,61 @@
       "opponent_nick": "",
       "opponent_profile": "REGULAR EQUILIBRADO",
       "result_reason": "Mano Ganada (Bote cobrado)"
+    },
+    {
+      "hand_uid": "515ed89e50be1589cf171c65",
+      "session_id": "ses_20261115_010503_021225",
+      "version_id": "1.3",
+      "hand_number": 139,
+      "scenario_id": "",
+      "is_synthetic": 0,
+      "code_hash": "1ea131c9a089654c",
+      "started_at": "2026-11-15 01:38:33",
+      "ended_at": "2026-11-15 01:39:00",
+      "date_str": "2026-11-15",
+      "position": "BTN",
+      "hole_cards": "S9 H5",
+      "preflop_tier": "BASURA",
+      "preflop_score": 30,
+      "board_flop": "CJ C8 S10",
+      "board_turn": "",
+      "board_river": "",
+      "final_board": "CJ C8 S10 C3 HA",
+      "reached_street": "RIVER",
+      "saw_flop": 1,
+      "went_to_showdown": 1,
+      "won_at_showdown": 0,
+      "won_hand": 0,
+      "vpip_flag": 1,
+      "pfr_flag": 0,
+      "three_bet_opp": 1,
+      "three_bet_flag": 0,
+      "faced_three_bet": 0,
+      "fold_to_three_bet": 0,
+      "cbet_flop_opp": 0,
+      "cbet_flop_flag": 0,
+      "faced_cbet_flop": 0,
+      "fold_to_cbet_flop": 0,
+      "hero_stack_start": 500.0,
+      "hero_stack_end": 400.0,
+      "effective_stack": 500.0,
+      "big_blind": 20.0,
+      "pot_final": 1370.0,
+      "invested_chips": 100.0,
+      "won_chips": 0.0,
+      "net_profit_chips": -100.0,
+      "net_profit_bb": -5.0,
+      "ev_net_chips": 438.46,
+      "ev_net_bb": 21.923,
+      "allin_ev_chips": 516.5,
+      "allin_ev_bb": 25.825,
+      "is_allin": 1,
+      "bankroll_after": 4296.0,
+      "ev_bankroll_after": 8582.37,
+      "opponent_id": "41194898",
+      "opponent_nick": "Belnebu",
+      "opponent_profile": "Regular equilibrado",
+      "result_reason": "Reinicio de mano / Modal"
     }
   ],
   "decisions": [
@@ -158740,6 +158829,148 @@
         "CALL": 0.7,
         "RAISE": 0.2,
         "FOLD": 0.1
+      }
+    },
+    {
+      "decision_uid": "51dc78e31df93b114b936131",
+      "hand_uid": "515ed89e50be1589cf171c65",
+      "session_id": "ses_20261115_010503_021225",
+      "version_id": "1.3",
+      "scenario_id": "",
+      "is_synthetic": 0,
+      "code_hash": "1ea131c9a089654c",
+      "timestamp": "2026-11-15 01:38:37",
+      "date_str": "2026-11-15",
+      "decision_index": 1,
+      "position": "BTN",
+      "street": "PREFLOP",
+      "hole_cards": "6♦ 6♠",
+      "board": "",
+      "pot_size": 100.0,
+      "to_call": 60.0,
+      "effective_stack": 500.0,
+      "big_blind": 20.0,
+      "pot_size_bucket": "MEDIUM (4-12 BB)",
+      "stack_depth_bucket": "DEEP (>20 BB)",
+      "intended_action": "CALL",
+      "action_taken": "CALL",
+      "bet_amount": 0.0,
+      "legal_actions": "[\"FOLD\", \"CALL\", \"RAISE\"]",
+      "evaluation_available": 1,
+      "gto_recommended_action": "CALL",
+      "gto_recommended_sizing": 60.0,
+      "gto_mixed_freq_json": "{\"CALL\": 0.7, \"RAISE\": 0.2, \"FOLD\": 0.1}",
+      "is_gto_aligned": 1,
+      "action_deviation": "EXACT_MATCH",
+      "ev_by_action_json": "{\"FOLD\": 0.0, \"CALL\": 38.29, \"RAISE\": 29.82, \"ALL_IN\": -67.41}",
+      "ev_taken_chips": 38.29,
+      "ev_best_chips": 38.29,
+      "ev_lost_chips": 0.0,
+      "ev_lost_bb": 0.0,
+      "estimated_equity": 0.6143,
+      "pot_odds_pct": 37.5,
+      "decision_quality": "OPTIMA",
+      "is_strategic_error": 0,
+      "is_missed_opportunity": 0,
+      "error_description": "Decisión sólida en EV",
+      "opponent_id": "41194898",
+      "opponent_nick": "Belnebu",
+      "opponent_profile": "Regular equilibrado",
+      "opponent_adaptation_aligned": 1,
+      "decision_source": "gto_fallback_0ms",
+      "confidence": 0.8,
+      "response_time_ms": 1542.119,
+      "enqueue_latency_ms": 0.0161,
+      "sqlite_write_ms": 0.1544,
+      "hand_final_result_chips": -100.0,
+      "hand_final_result_bb": -5.0,
+      "ev_by_action": {
+        "FOLD": 0.0,
+        "CALL": 38.29,
+        "RAISE": 29.82,
+        "ALL_IN": -67.41
+      },
+      "legal_actions_list": [
+        "FOLD",
+        "CALL",
+        "RAISE"
+      ],
+      "gto_mixed_frequencies": {
+        "CALL": 0.7,
+        "RAISE": 0.2,
+        "FOLD": 0.1
+      }
+    },
+    {
+      "decision_uid": "5474bbc2c7699d1d4e9719ce",
+      "hand_uid": "515ed89e50be1589cf171c65",
+      "session_id": "ses_20261115_010503_021225",
+      "version_id": "1.3",
+      "scenario_id": "",
+      "is_synthetic": 0,
+      "code_hash": "1ea131c9a089654c",
+      "timestamp": "2026-11-15 01:38:47",
+      "date_str": "2026-11-15",
+      "decision_index": 2,
+      "position": "BTN",
+      "street": "FLOP",
+      "hole_cards": "9♠ 5♥",
+      "board": "CJ C8 S10",
+      "pot_size": 130.0,
+      "to_call": 0.0,
+      "effective_stack": 500.0,
+      "big_blind": 20.0,
+      "pot_size_bucket": "MEDIUM (4-12 BB)",
+      "stack_depth_bucket": "DEEP (>20 BB)",
+      "intended_action": "CALL",
+      "action_taken": "ALL_IN",
+      "bet_amount": 0.0,
+      "legal_actions": "[\"CHECK\", \"BET\", \"RAISE\", \"ALL_IN\"]",
+      "evaluation_available": 1,
+      "gto_recommended_action": "CHECK",
+      "gto_recommended_sizing": 0.0,
+      "gto_mixed_freq_json": "{\"CHECK\": 0.7, \"BET\": 0.2, \"RAISE\": 0.1}",
+      "is_gto_aligned": 0,
+      "action_deviation": "AGGRESSIVE_DEVIATION (ALL_IN vs CHECK)",
+      "ev_by_action_json": "{\"FOLD\": 0.0, \"CHECK\": 58.5, \"BET\": 22.5, \"RAISE\": 22.5, \"ALL_IN\": -164.47}",
+      "ev_taken_chips": -164.47,
+      "ev_best_chips": 58.5,
+      "ev_lost_chips": 222.97,
+      "ev_lost_bb": 11.1485,
+      "estimated_equity": 0.45,
+      "pot_odds_pct": 0.0,
+      "decision_quality": "BLUNDER_EV",
+      "is_strategic_error": 1,
+      "is_missed_opportunity": 0,
+      "error_description": "Desviación subóptima (AGGRESSIVE_DEVIATION (ALL_IN vs CHECK)) con pérdida de 11.15 BB de EV",
+      "opponent_id": "41194898",
+      "opponent_nick": "Belnebu",
+      "opponent_profile": "Regular equilibrado",
+      "opponent_adaptation_aligned": 1,
+      "decision_source": "gto_fallback_0ms",
+      "confidence": 0.8,
+      "response_time_ms": 1454.168,
+      "enqueue_latency_ms": 0.0155,
+      "sqlite_write_ms": 0.286,
+      "hand_final_result_chips": -100.0,
+      "hand_final_result_bb": -5.0,
+      "ev_by_action": {
+        "FOLD": 0.0,
+        "CHECK": 58.5,
+        "BET": 22.5,
+        "RAISE": 22.5,
+        "ALL_IN": -164.47
+      },
+      "legal_actions_list": [
+        "CHECK",
+        "BET",
+        "RAISE",
+        "ALL_IN"
+      ],
+      "gto_mixed_frequencies": {
+        "CHECK": 0.7,
+        "BET": 0.2,
+        "RAISE": 0.1
       }
     }
   ]
