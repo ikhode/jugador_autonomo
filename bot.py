@@ -170,6 +170,12 @@ class GameTracker:
         self.last_opp_archetype = "Desconocido"
         self.last_action_taken = "WAIT"
         self.last_hand_net_chips = 0.0
+        self.last_street = "PREFLOP"
+        self.last_position = "DESCONOCIDA"
+        self.last_ev_diff = 0.0
+        self.last_decision_quality = ""
+        self.last_invested_chips = 0.0
+        self.last_big_blind = float(getattr(config, "BIG_BLIND_DEFAULT", 20.0))
         self.prev_player_states: Dict[str, Dict[str, Any]] = {}
         self.active_opponents: Dict[str, str] = {}
         self.ws_action_ts: float = 0.0
@@ -204,10 +210,18 @@ class GameTracker:
 
         res_lower = (resultado_str or "").lower()
         net_chips = float(self.last_hand_net_chips or 0.0)
-        if net_chips >= 0 and any(k in res_lower for k in ("perdid", "lost", "derrota", "eliminad")):
-            net_chips = -float(self.last_pot or getattr(config, "BIG_BLIND_DEFAULT", 20.0))
+        mano_ganada = any(k in res_lower for k in ("ganad", "won", "victoria", "cobrado"))
+        if net_chips >= 0 and not mano_ganada:
+            if any(k in res_lower for k in ("perdid", "lost", "derrota", "eliminad")):
+                net_chips = -float(self.last_invested_chips or self.last_pot or getattr(config, "BIG_BLIND_DEFAULT", 20.0))
+            elif self.last_invested_chips > 0:
+                net_chips = -float(self.last_invested_chips)
 
-        if net_chips < 0 and self.last_action_taken not in ("WAIT", "START_GAME", "REPLAY"):
+        tiene_error_tactico = (
+            float(self.last_ev_diff or 0.0) < -0.5
+            or str(self.last_decision_quality or "").upper() in ("INACCURACY", "MISTAKE", "BLUNDER_EV")
+        )
+        if (net_chips < 0 or tiene_error_tactico) and self.last_action_taken not in ("WAIT", "START_GAME", "REPLAY"):
             try:
                 experience_memory.auto_evaluar_y_registrar_mano_perdedora(
                     hand_tier=self.last_hand_tier or "DESCONOCIDO",
@@ -215,6 +229,11 @@ class GameTracker:
                     opp_archetype=self.last_opp_archetype or "Desconocido",
                     accion_tomada=self.last_action_taken,
                     net_chips=net_chips,
+                    ev_diff=float(self.last_ev_diff or 0.0),
+                    street=self.last_street or self.current_street or "PREFLOP",
+                    position=self.last_position or self.position_name or "DESCONOCIDA",
+                    big_blind=float(self.last_big_blind or getattr(config, "BIG_BLIND_DEFAULT", 20.0)),
+                    decision_quality=self.last_decision_quality or "",
                 )
             except Exception:
                 pass
@@ -234,6 +253,17 @@ class GameTracker:
         self.last_opp_archetype = "Desconocido"
         self.last_action_taken = "WAIT"
         self.last_hand_net_chips = 0.0
+        self.last_street = "PREFLOP"
+        self.last_position = "DESCONOCIDA"
+        self.last_ev_diff = 0.0
+        self.last_decision_quality = ""
+        self.last_invested_chips = 0.0
+        self.last_street = "PREFLOP"
+        self.last_position = "DESCONOCIDA"
+        self.last_ev_diff = 0.0
+        self.last_decision_quality = ""
+        self.last_invested_chips = 0.0
+        self.last_big_blind = float(getattr(config, "BIG_BLIND_DEFAULT", 20.0))
         self.prev_player_states: Dict[str, Dict[str, Any]] = {}
         self.active_opponents: Dict[str, str] = {}
         self.ws_action_ts: float = 0.0
@@ -980,11 +1010,14 @@ def actualizar_dom_data_conservando_contexto(
         textura = dom_data["gto_textura"].get("textura_mesa", "DESCONOCIDA")
         arquetipo = (dom_data.get("perfil_rival") or {}).get("estilo", "Desconocido")
         try:
+            calle_act = getattr(tracker_obj, "current_street", "") if tracker_obj is not None else str(dom_data.get("street") or "")
             dom_data["memoria_errores"] = memory_obj.buscar_errores_similares(
                 hand_tier=tier,
                 board_texture=textura,
                 opp_archetype=arquetipo,
                 limit=2,
+                street=calle_act,
+                position=posicion,
             )
         except Exception:
             dom_data.setdefault("memoria_errores", [])
@@ -2353,12 +2386,20 @@ def main():
                                     "monto": getattr(decision, "monto_apuesta", 0),
                                     "confianza": getattr(decision, "confianza", 0.0),
                                     "latency_ms": round(dt * 1000.0, 2),
+                                    "experience_memory_hit": 1 if dom_data.get("memoria_errores") else 0,
                                 },
                             )
                             tracker.last_hand_tier = (dom_data.get("gto_preflop") or {}).get("tier", "DESCONOCIDO")
                             tracker.last_board_texture = (dom_data.get("gto_textura") or {}).get("textura_mesa", "DESCONOCIDA")
                             tracker.last_opp_archetype = (dom_data.get("perfil_rival") or {}).get("estilo", "Desconocido")
                             tracker.last_action_taken = accion_ejecutada
+                            tracker.last_street = tracker.current_street
+                            tracker.last_position = tracker.position_name
+                            tracker.last_big_blind = float((dom_data.get("gto_math") or {}).get("big_blind") or getattr(config, "BIG_BLIND_DEFAULT", 20.0))
+                            if accion_ejecutada == "CALL":
+                                tracker.last_invested_chips += float((dom_data.get("gto_math") or {}).get("a_igualar") or 0.0)
+                            elif accion_ejecutada in ("RAISE", "ALL_IN"):
+                                tracker.last_invested_chips += float(getattr(decision, "monto_apuesta", 0) or (dom_data.get("gto_math") or {}).get("a_igualar") or 0.0)
                             if analytics_logger is not None:
                                 try:
                                     analytics_logger.registrar_decision(
