@@ -320,11 +320,11 @@ class LiveTableMonitor:
             for idx, j in enumerate(jugadores, start=1):
                 if not isinstance(j, dict):
                     continue
-                seat = j.get("seat") or idx
+                seat = j.get("seat") or j.get("asiento") or idx
                 is_hero = bool(j.get("is_hero"))
-                nick = str(j.get("nickname") or "").strip()
-                pid = str(j.get("player_id") or "").strip()
-                status = normalizar_estado_jugador(j.get("status"))
+                nick = str(j.get("nickname") or j.get("nick") or "").strip()
+                pid = str(j.get("player_id") or nick or "").strip()
+                status = normalizar_estado_jugador(j.get("status") or j.get("estado"))
                 stack = j.get("stack")
                 bet = j.get("bet")
                 is_turn = bool(j.get("is_turn"))

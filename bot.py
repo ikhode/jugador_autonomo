@@ -31,8 +31,24 @@ table_tracker = None
 
 def obtener_live_status() -> dict:
     if "table_tracker" in globals() and table_tracker is not None:
-        p_obj = globals().get("profiler")
-        return table_tracker.obtener_snapshot_live(opponents_profiler=p_obj)
+        tr = globals().get("tracker")
+        h_num = getattr(tr, "hand_number", 1) if tr else 1
+        c_street = getattr(tr, "current_street", "PREFLOP") if tr else "PREFLOP"
+        m_cards = getattr(tr, "my_cards", []) if tr else []
+        comm_cards = getattr(tr, "community_cards", []) if tr else []
+        l_pot = getattr(tr, "last_pot", 0.0) if tr else 0.0
+        pos_name = getattr(tr, "position_name", "DESCONOCIDA") if tr else "DESCONOCIDA"
+        l_events = getattr(tr, "current_hand_history", []) if tr else []
+
+        return table_tracker.obtener_snapshot_live(
+            hand_number=h_num,
+            current_street=c_street,
+            my_cards=m_cards,
+            community_cards=comm_cards,
+            last_pot=l_pot,
+            position_name=pos_name,
+            live_events=l_events,
+        )
     return cargar_snapshot_live_archivo()
 
 # Pool de subprocesos persistente global para cero bloqueos de E/S o red
@@ -556,9 +572,12 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
         const stackRival = Array.from(document.querySelectorAll('.player-area:not(.my-player) .player-chips, .player-area:not(.my-player) .chips-amount, .player-area:not(.my-player) .stack-amount, .player-area:not(.my-player) .player-balance'))
             .map(el => el.innerText.trim()).filter(Boolean).join(' | ') || '0';
 
-        const jugadoresMesa = Array.from(document.querySelectorAll('.player-area:not(.my-player)')).map((area, idx) => {
+        const jugadoresMesa = Array.from(document.querySelectorAll('.player-area')).map((area, idx) => {
+            const isHero = area.classList.contains('my-player');
             let nick = (area.querySelector('.player-name, .nickname, .username')?.innerText || '').trim();
-            if (!nick || /^(Time|Tiempo)[\s:\n]*\d+/i.test(nick) || /^\d+$/.test(nick)) {
+            if (isHero && (!nick || /^(Time|Tiempo)[\s:\n]*\d+/i.test(nick))) {
+                nick = 'Belnebu';
+            } else if (!nick || /^(Time|Tiempo)[\s:\n]*\d+/i.test(nick) || /^\d+$/.test(nick)) {
                 nick = `Rival_${idx + 1}`;
             }
             const stackTxt = (area.querySelector('.player-chips, .chips-amount, .stack-amount, .player-balance')?.innerText || '0').trim();
@@ -571,7 +590,19 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             const isFold = cls.includes('fold') || txtArea.includes('fold') || txtArea.includes('retir');
             const isEmpty = txtArea.includes('vacío') || txtArea.includes('empty');
             const estado = isEmpty ? 'VACIO' : (isFold ? 'FOLD' : 'ACTIVO');
-            return { asiento: idx + 1, nickname: nick, stack: stackTxt, bet: betVal, action: actionTxt, estado };
+            return {
+                seat: idx + 1,
+                asiento: idx + 1,
+                nickname: nick,
+                player_id: nick,
+                stack: stackTxt,
+                bet: betVal,
+                action: actionTxt,
+                status: estado,
+                estado: estado,
+                is_hero: isHero,
+                is_turn: isHero ? esMiTurno : (cls.includes('turn') || cls.includes('active'))
+            };
         }).filter(j => j.estado !== 'VACIO');
 
         const btnCallEl = accionesArea ? accionesArea.querySelector('#CALL, .action-call') : null;
