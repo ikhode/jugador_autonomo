@@ -27,6 +27,13 @@ GEMMA_LOCAL_MODEL_PATH = os.getenv("GEMMA_LOCAL_MODEL_PATH", "")
 MODO = os.getenv("MODO", "gemini").strip().lower()  # "determinista" | "hibrido" | "gemini"
 HYBRID_EV_DIFF_THRESHOLD_BB = float(os.getenv("HYBRID_EV_DIFF_THRESHOLD_BB", "0.5"))
 
+# Analítica honesta (Fase 5)
+MIN_LIVE_HANDS_FOR_IMPROVEMENT = int(os.getenv("MIN_LIVE_HANDS_FOR_IMPROVEMENT", "5000"))
+MIN_PAIRED_BENCHMARK_HANDS = int(os.getenv("MIN_PAIRED_BENCHMARK_HANDS", "30"))
+POWER_TARGET = float(os.getenv("POWER_TARGET", "0.80"))
+ALPHA_SIGNIFICANCE = float(os.getenv("ALPHA_SIGNIFICANCE", "0.05"))
+DEFAULT_TARGET_DELTA_BB100 = float(os.getenv("DEFAULT_TARGET_DELTA_BB100", "10.0"))
+
 
 def obtener_modo_activo() -> str:
     """Normaliza MODO y ACTIVE_MODEL al esquema único: determinista | hibrido | gemini."""

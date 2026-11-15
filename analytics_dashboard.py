@@ -450,11 +450,11 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
         <!-- BARRA DE FILTROS INTERACTIVOS -->
         <section class="filters-panel">
             <div class="filter-group">
-                <label>Origen de Datos (Real vs Lab)</label>
+                <label>Origen de Datos (Resultado en Vivo vs Benchmark Sintético)</label>
                 <select id="fDataSource" onchange="applyDashboardFilters()">
-                    <option value="ALL">Todos (Etiquetados Real + Lab)</option>
-                    <option value="LIVE">Solo Partidas Reales en Vivo (is_synthetic=0)</option>
-                    <option value="BENCHMARK">Solo Laboratorio Controlado (is_synthetic=1)</option>
+                    <option value="ALL">Todos (Resultado en Vivo + Benchmark Sintético)</option>
+                    <option value="LIVE">Resultado en Vivo (is_synthetic=0)</option>
+                    <option value="BENCHMARK">Benchmark Sintético (is_synthetic=1)</option>
                 </select>
             </div>
             <div class="filter-group">
@@ -1255,13 +1255,13 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
             const benchCount = hands.filter(h => h.is_synthetic).length;
             if (f.data_source === 'LIVE') {{
                 dsBadge.className = 'badge badge-green';
-                dsBadge.textContent = `Modo: VIVO REAL (${{liveCount}} manos)`;
+                dsBadge.textContent = `Resultado en Vivo (n=${{liveCount}} manos)`;
             }} else if (f.data_source === 'BENCHMARK') {{
                 dsBadge.className = 'badge badge-purple';
-                dsBadge.textContent = `Modo: LABORATORIO (${{benchCount}} manos)`;
+                dsBadge.textContent = `Benchmark Sintético (n=${{benchCount}} manos)`;
             }} else {{
                 dsBadge.className = 'badge badge-blue';
-                dsBadge.textContent = `Real: ${{liveCount}}m | Lab: ${{benchCount}}m`;
+                dsBadge.textContent = `Resultado en Vivo: ${{liveCount}}m | Benchmark Sintético: ${{benchCount}}m`;
             }}
 
             renderBanner(st, liveCount, benchCount);
@@ -1292,11 +1292,12 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
             else if (st.n < 30) sampleMsg = `⚠️ <strong>Muestra Exploratoria (${{st.n}} manos &lt; 30):</strong> Resultados financieros sujetos a varianza; guíese por el EV BB/100 y Regret.`;
             else if (st.n < 100) sampleMsg = `ℹ️ <strong>Muestra Preliminar (${{st.n}} manos):</strong> Suficiente para evaluar calidad estratégica; IC 95% de Winrate aún amplio (±${{st.ciMargin}} BB/100).`;
 
+            const reqHands = (RAW_DATA.operational_kpis && RAW_DATA.operational_kpis.required_hands_for_10bb100) || (RAW_DATA.sample_power && RAW_DATA.sample_power.required_hands) || '--';
             el.innerHTML = `
-                <div>${{sampleMsg}} <span style="color:var(--text-muted);margin-left:8px;">[Manos Reales Live: <b>${{liveCount}}</b> | Manos Lab Benchmark: <b>${{benchCount}}</b> | Oponentes Reales en DB: <b>${{(RAW_DATA.opponent_analysis?.opponents_hud_table || []).length}}</b>]</span></div>
+                <div>${{sampleMsg}} <span style="color:var(--text-muted);margin-left:8px;">[Resultado en Vivo: <b>${{liveCount}}</b> | Benchmark Sintético: <b>${{benchCount}}</b> | Manos necesarias (Δ=10 BB/100, 80% pot.): <b>${{reqHands}}</b> | Oponentes DB: <b>${{(RAW_DATA.opponent_analysis?.opponents_hud_table || []).length}}</b>]</span></div>
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                     ${{varBadge}}
-                    <span class="badge badge-purple">IC 95% EV: [${{(st.evBB100 - st.ciMargin*0.55).toFixed(1)}}, ${{(st.evBB100 + st.ciMargin*0.55).toFixed(1)}}] BB/100</span>
+                    <span class="badge badge-purple">IC 95% Winrate (n=${{st.n}}): [${{(st.bb100 - st.ciMargin).toFixed(1)}}, ${{(st.bb100 + st.ciMargin).toFixed(1)}}] BB/100</span>
                 </div>
             `;
         }}
@@ -1307,17 +1308,24 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
             const signBB = st.bb100 >= 0 ? '+' : '';
             const signEV = st.evBB100 >= 0 ? '+' : '';
             const bestVer = RAW_DATA.version_comparison?.best_overall_statistical_version || '1.3';
+            const opKpis = RAW_DATA.operational_kpis || {{}};
+            const illRate = opKpis.illegal_actions_corrected_rate_pct ?? 0;
+            const illCnt = opKpis.illegal_actions_corrected_count ?? 0;
+            const latAvg = opKpis.avg_decision_latency_ms ?? 0;
+            const latP95 = opKpis.p95_decision_latency_ms ?? 0;
+            const domErrs = opKpis.dom_errors_count ?? 0;
+            const memHits = opKpis.experience_memory_hits ?? 0;
 
             grid.innerHTML = `
                 <div class="kpi-card ${{st.netChips >= 0 ? 'kpi-green' : 'kpi-red'}}">
                     <div class="kpi-label">Beneficio Neto Observado</div>
                     <div class="kpi-value ${{st.netChips >= 0 ? 'text-pos' : 'text-neg'}}">${{signNet}}${{st.netChips}} <span style="font-size:0.85rem;">fichas</span></div>
-                    <div class="kpi-sub"><span>${{signNet}}${{st.netBB}} BB</span><span>ROI: ${{st.roiPct}}%</span></div>
+                    <div class="kpi-sub"><span>${{signNet}}${{st.netBB}} BB (n=${{st.n}})</span><span>ROI: ${{st.roiPct}}%</span></div>
                 </div>
                 <div class="kpi-card ${{st.bb100 >= 0 ? 'kpi-green' : 'kpi-red'}}">
-                    <div class="kpi-label">Winrate Real (Observado)</div>
+                    <div class="kpi-label">Winrate Real (n=${{st.n}})</div>
                     <div class="kpi-value ${{st.bb100 >= 0 ? 'text-pos' : 'text-neg'}}">${{signBB}}${{st.bb100}} <span style="font-size:0.85rem;">BB/100</span></div>
-                    <div class="kpi-sub"><span>IC 95%: ±${{st.ciMargin}}</span><span>Win%: ${{st.winPct}}%</span></div>
+                    <div class="kpi-sub"><span>IC 95%: [${{(st.bb100 - st.ciMargin).toFixed(1)}}, ${{(st.bb100 + st.ciMargin).toFixed(1)}}]</span><span>Win%: ${{st.winPct}}%</span></div>
                 </div>
                 <div class="kpi-card ${{st.evBB100 >= 0 ? 'kpi-green' : 'kpi-amber'}}">
                     <div class="kpi-label">EV Winrate &amp; All-in EV</div>
@@ -1325,14 +1333,14 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
                     <div class="kpi-sub"><span>All-in EV: ${{st.allinBB100 >= 0 ? '+' : ''}}${{st.allinBB100}} BB/100</span><span>EV Neto: ${{st.evBB}} BB</span></div>
                 </div>
                 <div class="kpi-card kpi-purple">
-                    <div class="kpi-label">Calidad EV / Heurística-GTO</div>
-                    <div class="kpi-value" style="color:var(--accent-blue);">${{st.gtoPct}}%</div>
-                    <div class="kpi-sub"><span>Exact Match: ${{st.exactGtoPct}}%</span><span>Adaptación: ${{st.adaptPct}}%</span></div>
+                    <div class="kpi-label">HUD Hero (VPIP / PFR) &amp; GTO</div>
+                    <div class="kpi-value" style="color:var(--accent-blue);">${{st.vpipPct}}% / ${{st.pfrPct}}%</div>
+                    <div class="kpi-sub"><span>GTO: ${{st.gtoPct}}% (Exact: ${{st.exactGtoPct}}%)</span><span>Adaptación: ${{st.adaptPct}}%</span></div>
                 </div>
                 <div class="kpi-card ${{st.errPct <= 8 ? 'kpi-green' : 'kpi-amber'}}">
-                    <div class="kpi-label">Regret (EV Perdido) y Errores</div>
-                    <div class="kpi-value ${{st.errPct <= 8 ? 'text-pos' : 'text-neg'}}">-${{st.evLost100}} <span style="font-size:0.85rem;">BB/100</span></div>
-                    <div class="kpi-sub"><span>Errores: ${{st.errors}} (${{st.errPct}}%)</span><span>Missed Val: ${{st.missedOpps}}</span></div>
+                    <div class="kpi-label">Salud Operativa &amp; Latencia</div>
+                    <div class="kpi-value" style="color:#fbbf24;">${{latAvg}} <span style="font-size:0.85rem;">ms</span></div>
+                    <div class="kpi-sub"><span>P95: ${{latP95}}ms | DOM Err: ${{domErrs}}</span><span>Ilegales: ${{illCnt}} (${{illRate}}%) | Mem: ${{memHits}}</span></div>
                 </div>
                 <div class="kpi-card kpi-green">
                     <div class="kpi-label">Mejor Versión Experimental</div>

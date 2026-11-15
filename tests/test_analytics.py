@@ -111,17 +111,45 @@ class TestStatisticalFormulasAndHypothesisTesting(unittest.TestCase):
         self.assertEqual(small["verdict_state"], "INCONCLUSO")
         self.assertTrue(small["is_exploratory"])
 
-        # Muestra suficiente con evidencia favorable -> MEJORA
-        imp = clasificar_estado_comparacion(
+        # Muestra insuficiente en vivo (120 < 5000) -> INCONCLUSO exploratorio
+        imp_too_small_live = clasificar_estado_comparacion(
             n_prev=120,
             n_curr=120,
             delta_ev_bb100=18.5,
             holm_p_value=0.002,
             ci95_diff=[8.0, 29.0],
             cohens_d=0.65,
+            is_live=True,
+        )
+        self.assertEqual(imp_too_small_live["verdict_state"], "INCONCLUSO")
+        self.assertTrue(imp_too_small_live["is_exploratory"])
+
+        # Muestra suficiente en vivo (>= 5000) con evidencia favorable -> MEJORA
+        imp = clasificar_estado_comparacion(
+            n_prev=5000,
+            n_curr=5000,
+            delta_ev_bb100=18.5,
+            holm_p_value=0.002,
+            ci95_diff=[8.0, 29.0],
+            cohens_d=0.65,
+            is_live=True,
         )
         self.assertEqual(imp["verdict_state"], "MEJORA")
         self.assertFalse(imp["is_exploratory"])
+
+        # Benchmark pareado con mínimo de potencia satisfecho -> MEJORA
+        imp_bench = clasificar_estado_comparacion(
+            n_prev=120,
+            n_curr=120,
+            delta_ev_bb100=18.5,
+            holm_p_value=0.002,
+            ci95_diff=[8.0, 29.0],
+            cohens_d=0.65,
+            is_live=False,
+            paired_power_min_n=100,
+        )
+        self.assertEqual(imp_bench["verdict_state"], "MEJORA")
+        self.assertFalse(imp_bench["is_exploratory"])
 
         # Muestra suficiente con deterioro significativo -> REGRESIÓN
         reg = clasificar_estado_comparacion(

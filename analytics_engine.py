@@ -17,6 +17,7 @@ import math
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+import config
 from analytics_db import AnalyticsStorage, DB_PATH
 from analytics_diagnostics import (
     construir_reporte_confiabilidad_sistema,
@@ -320,6 +321,54 @@ def paired_t_test(pairs_a_b: List[Tuple[float, float]], scale: float = 100.0) ->
     }
 
 
+def _normal_ppf(p: float) -> float:
+    """Inversa aproximada de la normal estándar (búsqueda binaria sobre _normal_cdf)."""
+    p = max(1e-9, min(1.0 - 1e-9, float(p)))
+    lo, hi = -8.0, 8.0
+    for _ in range(50):
+        mid = 0.5 * (lo + hi)
+        if _normal_cdf(mid) < p:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def calcular_tamano_muestra_necesario(
+    delta_bb100: float = config.DEFAULT_TARGET_DELTA_BB100,
+    std_bb_per_hand: float = 15.0,
+    alpha: float = config.ALPHA_SIGNIFICANCE,
+    power: float = config.POWER_TARGET,
+    paired: bool = False,
+) -> Dict[str, Any]:
+    """
+    Calcula cuántas manos hacen falta para detectar una diferencia de `delta_bb100`
+    (en BB/100) con nivel de significancia `alpha` (bilateral) y potencia estadística `power`.
+    """
+    delta_clean = abs(float(delta_bb100 or 0.0))
+    if delta_clean <= 1e-6:
+        delta_clean = float(config.DEFAULT_TARGET_DELTA_BB100)
+
+    used_default_std = std_bb_per_hand is None or float(std_bb_per_hand) <= 0.0
+    std_hand = 15.0 if used_default_std else float(std_bb_per_hand)
+
+    z_alpha = _normal_ppf(1.0 - float(alpha) / 2.0)
+    z_beta = _normal_ppf(float(power))
+    delta_per_hand = delta_clean / 100.0
+    factor = 1.0 if paired else 2.0
+    required_n = math.ceil(factor * (((z_alpha + z_beta) * std_hand / delta_per_hand) ** 2))
+
+    return {
+        "required_hands": int(required_n),
+        "target_delta_bb100": round(delta_clean, 2),
+        "std_bb_per_hand": round(std_hand, 4),
+        "used_default_std": used_default_std,
+        "alpha": float(alpha),
+        "power": float(power),
+        "paired": bool(paired),
+    }
+
+
 def clasificar_estado_comparacion(
     n_prev: int,
     n_curr: int,
@@ -328,14 +377,25 @@ def clasificar_estado_comparacion(
     ci95_diff: List[float],
     cohens_d: float,
     delta_error_rate_pct: float = 0.0,
+    is_live: bool = True,
+    paired_power_min_n: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Clasifica rigurosamente una comparación experimental en los tres estados exigidos (Fase 3):
-    - `MEJORA`: Evidencia favorable y suficiente (n >= 30, p_Holm < 0.05, IC95% > 0, Cohen's d >= 0.15, sin aumento grave de errores).
+    Clasifica rigurosamente una comparación experimental en los tres estados exigidos:
+    - `MEJORA`: Evidencia favorable y suficiente (en vivo >= MIN_LIVE_HANDS_FOR_IMPROVEMENT; en benchmark pareado >= mínimo de potencia).
     - `REGRESIÓN`: Evidencia de deterioro (n >= 30 y [p_Holm < 0.05 con ΔEV < 0 o degradación sustancial]).
-    - `INCONCLUSO`: Evidencia insuficiente o muestra exploratoria (< 50 manos).
+    - `INCONCLUSO`: Evidencia insuficiente o muestra exploratoria.
     """
-    is_exploratory = (n_prev < 50) or (n_curr < 50)
+    min_n_observed = min(n_prev, n_curr)
+    if is_live:
+        min_hands_threshold = int(config.MIN_LIVE_HANDS_FOR_IMPROVEMENT)
+    else:
+        min_hands_threshold = max(
+            int(config.MIN_PAIRED_BENCHMARK_HANDS),
+            int(paired_power_min_n or config.MIN_PAIRED_BENCHMARK_HANDS),
+        )
+
+    is_exploratory = min_n_observed < min_hands_threshold
     ci_low = float(ci95_diff[0]) if len(ci95_diff) >= 2 else delta_ev_bb100
     ci_high = float(ci95_diff[1]) if len(ci95_diff) >= 2 else delta_ev_bb100
 
@@ -344,23 +404,51 @@ def clasificar_estado_comparacion(
             "verdict_state": "INCONCLUSO",
             "legacy_verdict": "MUESTRA_INSUFICIENTE",
             "is_exploratory": True,
-            "sample_tag": f"EXPLORATORIA (n={min(n_prev, n_curr)} < 30)",
+            "n_prev": n_prev,
+            "n_curr": n_curr,
+            "min_hands_threshold": min_hands_threshold,
+            "is_live": is_live,
+            "sample_tag": f"EXPLORATORIA (n={min_n_observed} < 30)",
             "reason": (
                 f"Evidencia insuficiente: muestra exploratoria (n_prev={n_prev}, n_curr={n_curr} < 30). "
                 "No se declara MEJORA ni REGRESIÓN hasta alcanzar tamaño muestral suficiente."
             ),
         }
 
-    sample_tag = f"EXPLORATORIA (n={min(n_prev, n_curr)})" if is_exploratory else f"CONFIRMATORIA (n={min(n_prev, n_curr)})"
+    sample_tag = (
+        f"EXPLORATORIA (n={min_n_observed} < {min_hands_threshold})"
+        if is_exploratory
+        else f"CONFIRMATORIA (n={min_n_observed} >= {min_hands_threshold})"
+    )
 
     if holm_p_value < 0.05 and delta_ev_bb100 > 0 and ci_low > 0 and cohens_d >= 0.15 and delta_error_rate_pct <= 2.0:
+        if is_exploratory:
+            return {
+                "verdict_state": "INCONCLUSO",
+                "legacy_verdict": "MUESTRA_INSUFICIENTE",
+                "is_exploratory": True,
+                "n_prev": n_prev,
+                "n_curr": n_curr,
+                "min_hands_threshold": min_hands_threshold,
+                "is_live": is_live,
+                "sample_tag": sample_tag,
+                "reason": (
+                    f"INCONCLUSO: tendencia positiva (ΔEV = {delta_ev_bb100:+.2f} BB/100, p-Holm = {holm_p_value:.4f}), "
+                    f"pero muestra insuficiente para declarar MEJORA (n_prev={n_prev}, n_curr={n_curr} < mínimo {min_hands_threshold})."
+                ),
+            }
         return {
             "verdict_state": "MEJORA",
             "legacy_verdict": "MEJORA_CONFIRMADA",
-            "is_exploratory": is_exploratory,
+            "is_exploratory": False,
+            "n_prev": n_prev,
+            "n_curr": n_curr,
+            "min_hands_threshold": min_hands_threshold,
+            "is_live": is_live,
             "sample_tag": sample_tag,
             "reason": (
-                f"MEJORA verificada: ΔEV = {delta_ev_bb100:+.2f} BB/100 (IC 95%: [{ci_low:+.2f}, {ci_high:+.2f}]), "
+                f"MEJORA verificada (n_prev={n_prev}, n_curr={n_curr} >= {min_hands_threshold}): "
+                f"ΔEV = {delta_ev_bb100:+.2f} BB/100 (IC 95%: [{ci_low:+.2f}, {ci_high:+.2f}]), "
                 f"p-Holm = {holm_p_value:.4f} < 0.05, tamaño del efecto d = {cohens_d:+.2f}."
             ),
         }
@@ -372,6 +460,10 @@ def clasificar_estado_comparacion(
             "verdict_state": "REGRESIÓN",
             "legacy_verdict": "RETROCESO_CONFIRMADO",
             "is_exploratory": is_exploratory,
+            "n_prev": n_prev,
+            "n_curr": n_curr,
+            "min_hands_threshold": min_hands_threshold,
+            "is_live": is_live,
             "sample_tag": sample_tag,
             "reason": (
                 f"REGRESIÓN detectada: ΔEV = {delta_ev_bb100:+.2f} BB/100 (IC 95%: [{ci_low:+.2f}, {ci_high:+.2f}]), "
@@ -383,10 +475,14 @@ def clasificar_estado_comparacion(
         "verdict_state": "INCONCLUSO",
         "legacy_verdict": "SIN_CAMBIO_RELEVANTE",
         "is_exploratory": is_exploratory,
+        "n_prev": n_prev,
+        "n_curr": n_curr,
+        "min_hands_threshold": min_hands_threshold,
+        "is_live": is_live,
         "sample_tag": sample_tag,
         "reason": (
             f"INCONCLUSO: evidencia insuficiente para rechazar igualdad o tamaño del efecto pequeño "
-            f"(ΔEV = {delta_ev_bb100:+.2f} BB/100, IC 95%: [{ci_low:+.2f}, {ci_high:+.2f}], p-Holm = {holm_p_value:.4f}, d = {cohens_d:+.2f})."
+            f"(n_prev={n_prev}, n_curr={n_curr}, ΔEV = {delta_ev_bb100:+.2f} BB/100, IC 95%: [{ci_low:+.2f}, {ci_high:+.2f}], p-Holm = {holm_p_value:.4f}, d = {cohens_d:+.2f})."
         ),
     }
 
@@ -1758,6 +1854,63 @@ class PokerAnalyticsEngine:
             stat_processing_ms=stat_processing_ms,
         )
 
+        sample_power_info = calcular_tamano_muestra_necesario(
+            delta_bb100=config.DEFAULT_TARGET_DELTA_BB100,
+            std_bb_per_hand=wr_stats["std_per_unit"] if wr_stats["std_per_unit"] > 0 else 15.0,
+            alpha=config.ALPHA_SIGNIFICANCE,
+            power=config.POWER_TARGET,
+            paired=(live_hands_count == 0 and benchmark_hands_count > 0),
+        )
+        stat_eval["observed_metrics"]["n"] = n_hands
+        stat_eval["observed_metrics"]["required_hands_for_10bb100"] = sample_power_info["required_hands"]
+
+        illegal_corrected_count = sum(
+            1
+            for d in decisions
+            if d.get("illegal_action_corrected")
+            or d.get("action_was_corrected")
+            or "ILEGAL" in str(d.get("correction_reason") or d.get("error_description") or d.get("notes") or d.get("error_type") or "").upper()
+            or (
+                bool(d.get("intended_action"))
+                and bool(d.get("action_taken"))
+                and str(d.get("intended_action")).upper() != str(d.get("action_taken")).upper()
+                and "CORREG" in str(d.get("error_description") or d.get("correction_reason") or "").upper()
+            )
+        )
+        illegal_corrected_rate_pct = (
+            round((illegal_corrected_count / total_decisions) * 100.0, 2) if total_decisions > 0 else 0.0
+        )
+        dom_errors_count = sum(int(t.get("dom_errors") or 0) for t in telemetry_rows) + sum(
+            1
+            for d in decisions
+            if d.get("dom_error")
+            or "DOM" in str(d.get("error_type") or d.get("error_description") or "").upper()
+        )
+        experience_memory_hits = sum(
+            int(d.get("experience_memory_hits") or d.get("memory_hits") or (1 if d.get("experience_memory_hit") else 0))
+            for d in decisions
+        )
+        dec_lat = system_reliability.get("decision_latency", {})
+        operational_kpis = {
+            "n_hands": n_hands,
+            "live_hands_count": live_hands_count,
+            "benchmark_hands_count": benchmark_hands_count,
+            "winrate_bb100": wr_stats["mean"],
+            "winrate_ci95": [wr_stats["ci95_low"], wr_stats["ci95_high"]],
+            "allin_ev_bb100": allin_wr_stats["mean"],
+            "allin_ev_ci95": [allin_wr_stats["ci95_low"], allin_wr_stats["ci95_high"]],
+            "hero_vpip_pct": hud_stats.get("vpip_pct", 0.0),
+            "hero_pfr_pct": hud_stats.get("pfr_pct", 0.0),
+            "illegal_actions_corrected_count": illegal_corrected_count,
+            "illegal_actions_corrected_rate_pct": illegal_corrected_rate_pct,
+            "avg_decision_latency_ms": float(dec_lat.get("mean_ms") or 0.0),
+            "p95_decision_latency_ms": float(dec_lat.get("p95_ms") or 0.0),
+            "dom_errors_count": dom_errors_count,
+            "experience_memory_hits": experience_memory_hits,
+            "required_hands_for_10bb100": sample_power_info["required_hands"],
+            "min_live_hands_for_improvement": int(config.MIN_LIVE_HANDS_FOR_IMPROVEMENT),
+        }
+
         result_payload = {
             "filters_applied": filters or {},
             "data_source_summary": {
@@ -1854,6 +2007,8 @@ class PokerAnalyticsEngine:
                 "opponents_hud_table": oponentes_db,
             },
             "statistical_evaluation": stat_eval,
+            "operational_kpis": operational_kpis,
+            "sample_power": sample_power_info,
             "version_comparison": version_comparison,
             "experiments_history": experiments,
             "versions_history": versions,
@@ -2577,6 +2732,21 @@ class PokerAnalyticsEngine:
             else:
                 unchanged.append("Adaptación Rival")
 
+            is_live_comparison = data_source != "benchmark"
+            paired_res = cdata.get("paired_ev_res")
+            std_for_power = (
+                float(paired_res.get("std_diff", 15.0))
+                if isinstance(paired_res, dict) and paired_res.get("std_diff", 0.0) > 0
+                else (float(row.get("std_bb_per_hand") or 15.0))
+            )
+            power_info = calcular_tamano_muestra_necesario(
+                delta_bb100=config.DEFAULT_TARGET_DELTA_BB100,
+                std_bb_per_hand=std_for_power,
+                alpha=config.ALPHA_SIGNIFICANCE,
+                power=config.POWER_TARGET,
+                paired=not is_live_comparison,
+            )
+
             state_info = clasificar_estado_comparacion(
                 n_prev=prev_row["hands_evaluated"],
                 n_curr=row["hands_evaluated"],
@@ -2585,10 +2755,17 @@ class PokerAnalyticsEngine:
                 ci95_diff=cdata["effective_ci95_diff"],
                 cohens_d=cdata["effective_cohens_d"],
                 delta_error_rate_pct=delta_err,
+                is_live=is_live_comparison,
+                paired_power_min_n=power_info["required_hands"],
             )
 
             row["comparison_vs_prev"] = {
                 "base_version": parent_id,
+                "n_prev": prev_row["hands_evaluated"],
+                "n_curr": row["hands_evaluated"],
+                "min_hands_threshold": state_info["min_hands_threshold"],
+                "required_hands_for_power": power_info["required_hands"],
+                "is_live": is_live_comparison,
                 "delta_bb_per_100": delta_bb100,
                 "delta_ev_bb_per_100": delta_ev_bb100,
                 "delta_gto_pct": delta_gto,
