@@ -191,6 +191,10 @@ class GameTracker:
             self.current_hand_history.pop(0)
 
     def finalizar_mano_actual(self, resultado_str: str):
+        ahora = time.time()
+        if getattr(self, "_last_finalized_hand_ts", 0) > 0 and (ahora - self._last_finalized_hand_ts < 2.0):
+            return
+        self._last_finalized_hand_ts = ahora
         resumen = f"Mano #{self.hand_number}: Posición {self.position_name} | Cartas {self.my_cards} | Bote: {self.last_pot} | Resultado: {resultado_str}"
         self.past_hands_summary.append(resumen)
         if len(self.past_hands_summary) > 5:
@@ -310,8 +314,22 @@ def procesar_delta_player_states(
     for ps in states:
         if not isinstance(ps, dict):
             continue
-        pid = str(ps.get("playerCode") or ps.get("id") or ps.get("nickname") or "").strip()
-        nick = str(ps.get("nickname") or pid).strip()
+        pid = str(
+            ps.get("playerCode")
+            or ps.get("playerId")
+            or ps.get("id")
+            or ps.get("code")
+            or ps.get("nickname")
+            or ps.get("playerName")
+            or ps.get("name")
+            or ""
+        ).strip()
+        nick = str(
+            ps.get("nickname")
+            or ps.get("playerName")
+            or ps.get("name")
+            or pid
+        ).strip()
         if not pid and not nick:
             continue
 
@@ -322,10 +340,11 @@ def procesar_delta_player_states(
             or (hero_nick_l and nick.lower() == hero_nick_l)
             or (cards_ps and tracker_obj.my_cards and cards_ps == tracker_obj.my_cards)
         )
-        bet = float(ps.get("bet") or ps.get("roundBet") or ps.get("currentBet") or 0.0)
-        status = str(ps.get("status") or ps.get("state") or "ACTIVE").upper()
-        action_ws = str(ps.get("action") or ps.get("lastAction") or "").upper()
-        seat = ps.get("seat")
+        bet = float(ps.get("bet") or ps.get("roundBet") or ps.get("currentBet") or ps.get("chipsInPlay") or 0.0)
+        raw_status = ps.get("status") or ps.get("state") or ("FOLD" if ps.get("folded") else "ACTIVE")
+        status = str(raw_status).upper()
+        action_ws = str(ps.get("action") or ps.get("lastAction") or ps.get("actionType") or "").upper()
+        seat = ps.get("seat") or ps.get("seatNo")
 
         if es_hero:
             tracker_obj.prev_player_states[pid or nick] = {"bet": bet, "status": status, "nickname": nick}
@@ -401,13 +420,19 @@ def procesar_delta_player_states(
                 status=status,
                 hand_id=hand_id,
             )
-            tracker_obj.opp_id = pid
-            tracker_obj.opp_nick = nick
+            if status not in ("FOLD", "FOLDED", "OUT", "ELIMINATED") or not tracker_obj.active_opponents:
+                tracker_obj.opp_id = pid
+                tracker_obj.opp_nick = nick
             tracker_obj.ws_action_ts = time.time()
             tracker_obj.registrar_evento("WS_ACCION", f"{nick} ({pid}): {accion_detectada}")
             atribuidas.append((pid, nick, accion_detectada))
 
         tracker_obj.prev_player_states[pid] = {"bet": bet, "status": status, "nickname": nick}
+
+    if tracker_obj.active_opponents and tracker_obj.opp_id not in tracker_obj.active_opponents:
+        act_id, act_nick = next(iter(tracker_obj.active_opponents.items()))
+        tracker_obj.opp_id = act_id
+        tracker_obj.opp_nick = act_nick
 
     return atribuidas
 
@@ -520,12 +545,16 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
         const jugadoresMesa = Array.from(document.querySelectorAll('.player-area:not(.my-player)')).map((area, idx) => {
             const nick = (area.querySelector('.player-name, .nickname, .username')?.innerText || `Rival_${idx + 1}`).trim();
             const stackTxt = (area.querySelector('.player-chips, .chips-amount, .stack-amount, .player-balance')?.innerText || '0').trim();
+            const betEl = area.querySelector('.player-bet .amount, .bet-amount, .chip-amount, .bet');
+            const betVal = (betEl ? (betEl.innerText || betEl.textContent || '') : '').replace(/[^\d.]/g, '');
+            const actionEl = area.querySelector('.player-action, .action-label, .action-text, .bubble, .last-action');
+            const actionTxt = (actionEl ? (actionEl.innerText || actionEl.textContent || '') : '').trim();
             const cls = (area.className || '').toLowerCase();
             const txtArea = (area.innerText || '').toLowerCase();
             const isFold = cls.includes('fold') || txtArea.includes('fold') || txtArea.includes('retir');
             const isEmpty = txtArea.includes('vacío') || txtArea.includes('empty');
             const estado = isEmpty ? 'VACIO' : (isFold ? 'FOLD' : 'ACTIVO');
-            return { asiento: idx + 1, nickname: nick, stack: stackTxt, estado };
+            return { asiento: idx + 1, nickname: nick, stack: stackTxt, bet: betVal, action: actionTxt, estado };
         }).filter(j => j.estado !== 'VACIO');
 
         const btnCallEl = accionesArea ? accionesArea.querySelector('#CALL, .action-call') : null;
@@ -568,6 +597,9 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             modales.push('MesaFinalizadaVacia');
         }
 
+        const esDealerHero = !!document.querySelector('.my-player .dealer-button, .my-player .dealer-chip, .my-player .dealer-badge, .my-player.dealer, .my-player [class*="dealer"]');
+        const posDom = esDealerHero ? 'BTN' : '';
+
         return {
             mis_cartas: misCartas.join(' '),
             cartas_comunitarias: comunitarias.join(' '),
@@ -584,7 +616,8 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             tiempo_restante: timerTexto,
             apuestas_rivales: apuestasRivales,
             jugadores_mesa: jugadoresMesa,
-            big_blind: bigBlindDom
+            big_blind: bigBlindDom,
+            posicion: posDom
         };
     } catch(e) {
         return null;
@@ -962,10 +995,6 @@ def actualizar_dom_data_conservando_contexto(
     dom_data["bote"] = bote
 
     if profiler_obj is not None and tracker_obj is not None:
-        dom_data["perfil_rival"] = profiler_obj.obtener_perfil_explotativo(
-            getattr(tracker_obj, "opp_id", ""),
-            getattr(tracker_obj, "opp_nick", ""),
-        )
         jugadores = dom_data.get("jugadores_mesa") or []
         if isinstance(jugadores, list) and jugadores:
             bb_val = _parse_num_dom(dom_data.get("big_blind"), float(getattr(config, "BIG_BLIND_DEFAULT", 20.0))) or 20.0
@@ -975,6 +1004,62 @@ def actualizar_dom_data_conservando_contexto(
                     continue
                 nick_j = j.get("nickname", "")
                 pid_j = j.get("player_id") or nick_j
+                if not getattr(tracker_obj, "opp_nick", ""):
+                    tracker_obj.opp_nick = nick_j
+                if not getattr(tracker_obj, "opp_id", ""):
+                    tracker_obj.opp_id = pid_j
+                if pid_j:
+                    tracker_obj.active_opponents[pid_j] = nick_j
+
+                # Sincronización y atribución de acciones por delta DOM
+                bet_dom = _parse_num_dom(j.get("bet"), 0.0)
+                estado_dom = str(j.get("estado", "ACTIVO")).upper()
+                action_dom = str(j.get("action", "")).upper()
+                prev_state = tracker_obj.prev_player_states.get(pid_j or nick_j, {})
+                prev_bet = float(prev_state.get("bet", 0.0))
+                prev_st = str(prev_state.get("status", "ACTIVE")).upper()
+
+                calle = getattr(tracker_obj, "current_street", "PREFLOP")
+                hand_id = getattr(tracker_obj, "hand_number", 1)
+
+                if estado_dom in ("FOLD", "FOLDED") and prev_st not in ("FOLD", "FOLDED"):
+                    profiler_obj.registrar_accion_rival(
+                        player_id=pid_j,
+                        nickname=nick_j,
+                        accion="FOLD",
+                        calle=calle,
+                        seat=j.get("asiento"),
+                        status=estado_dom,
+                        hand_id=hand_id,
+                    )
+                elif bet_dom > prev_bet:
+                    act = "RAISE" if (calle == "PREFLOP" or prev_bet > 0) else "BET"
+                    profiler_obj.registrar_accion_rival(
+                        player_id=pid_j,
+                        nickname=nick_j,
+                        accion=act,
+                        calle=calle,
+                        seat=j.get("asiento"),
+                        status=estado_dom,
+                        hand_id=hand_id,
+                    )
+                elif "CHECK" in action_dom and calle != "PREFLOP":
+                    profiler_obj.registrar_accion_rival(
+                        player_id=pid_j,
+                        nickname=nick_j,
+                        accion="CHECK",
+                        calle=calle,
+                        seat=j.get("asiento"),
+                        status=estado_dom,
+                        hand_id=hand_id,
+                    )
+
+                tracker_obj.prev_player_states[pid_j or nick_j] = {
+                    "bet": bet_dom,
+                    "status": estado_dom,
+                    "nickname": nick_j,
+                }
+
                 prof_j = dict(profiler_obj.obtener_perfil_explotativo(pid_j, nick_j))
                 stack_chips = _parse_num_dom(j.get("stack"), 0.0)
                 prof_j["asiento"] = j.get("asiento", len(perfiles_multi) + 1)
@@ -985,6 +1070,11 @@ def actualizar_dom_data_conservando_contexto(
             if perfiles_multi:
                 dom_data["perfiles_oponentes"] = perfiles_multi
 
+        dom_data["perfil_rival"] = profiler_obj.obtener_perfil_explotativo(
+            getattr(tracker_obj, "opp_id", ""),
+            getattr(tracker_obj, "opp_nick", ""),
+        )
+
     gto_math = calcular_pot_odds_y_sizing(
         bote,
         dom_data.get("a_igualar"),
@@ -992,9 +1082,31 @@ def actualizar_dom_data_conservando_contexto(
         big_blind=_parse_num_dom(dom_data.get("big_blind"), float(getattr(config, "BIG_BLIND_DEFAULT", 20.0))) or None,
         stack_rival_str=dom_data.get("stack_rival"),
     )
-    posicion = getattr(tracker_obj, "position_name", "BTN") if tracker_obj is not None else (dom_data.get("posicion") or "BTN")
-    if posicion == "DESCONOCIDA":
-        posicion = "BTN"
+    posicion = getattr(tracker_obj, "position_name", "DESCONOCIDA") if tracker_obj is not None else "DESCONOCIDA"
+    if not posicion or posicion == "DESCONOCIDA":
+        posicion = str(dom_data.get("posicion") or "DESCONOCIDA").upper()
+
+    if not posicion or posicion == "DESCONOCIDA":
+        if getattr(tracker_obj, "is_dealer", False) or dom_data.get("posicion") == "BTN":
+            posicion = "BTN"
+        else:
+            bb = _parse_num_dom(dom_data.get("big_blind"), float(getattr(config, "BIG_BLIND_DEFAULT", 20.0))) or 20.0
+            a_ig = _parse_num_dom(dom_data.get("a_igualar"), 0.0)
+            bote_f = _parse_num_dom(dom_data.get("bote"), 0.0)
+            opciones_str = str(dom_data.get("opciones_disponibles", "")).upper()
+            if not comunitarias and "CHECK" in opciones_str and a_ig == 0.0:
+                posicion = "BB"
+            elif not comunitarias and abs(a_ig - 0.5 * bb) < 0.2 * bb:
+                posicion = "SB"
+            elif not comunitarias and bote_f <= 1.5 * bb and abs(a_ig - bb) < 0.2 * bb:
+                posicion = "BTN"
+            else:
+                posicion = "BTN"
+
+    if tracker_obj is not None:
+        tracker_obj.position_name = posicion
+        tracker_obj.is_dealer = (posicion == "BTN")
+    dom_data["posicion"] = posicion
     a_igualar_bb = float(gto_math.get("a_igualar_bb") or 0.0)
     situacion = dom_data.get("situacion") or (
         "vs_allin"
@@ -2080,28 +2192,28 @@ def main():
                             elif "chips_placed.mp3" in url or "action_bet.png" in url:
                                 tracker.registrar_evento("ACCION_MESA", "Apuesta/Fichas colocadas (señal de sonido/timing)")
                                 if (
-                                    len(tracker.active_opponents) == 1
+                                    len(tracker.active_opponents) <= 2
                                     and (tracker.opp_id or tracker.opp_nick)
-                                    and (time.time() - tracker.hero_just_acted_ts > 1.5)
-                                    and (time.time() - tracker.ws_action_ts > 1.2)
+                                    and (time.time() - tracker.hero_just_acted_ts > 1.2)
+                                    and (time.time() - tracker.ws_action_ts > 1.0)
                                 ):
                                     profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "BET", calle=tracker.current_street, hand_id=tracker.hand_number)
                             elif "player_fold.mp3" in url or "action_fold.png" in url:
                                 tracker.registrar_evento("ACCION_MESA", "Fold detectado (señal de sonido/timing)")
                                 if (
-                                    len(tracker.active_opponents) == 1
+                                    len(tracker.active_opponents) <= 2
                                     and (tracker.opp_id or tracker.opp_nick)
-                                    and (time.time() - tracker.hero_just_acted_ts > 1.5)
-                                    and (time.time() - tracker.ws_action_ts > 1.2)
+                                    and (time.time() - tracker.hero_just_acted_ts > 1.2)
+                                    and (time.time() - tracker.ws_action_ts > 1.0)
                                 ):
                                     profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "FOLD", calle=tracker.current_street, hand_id=tracker.hand_number)
                             elif "player_check.mp3" in url or "action_check.png" in url:
                                 tracker.registrar_evento("ACCION_MESA", "Check detectado (señal de sonido/timing)")
                                 if (
-                                    len(tracker.active_opponents) == 1
+                                    len(tracker.active_opponents) <= 2
                                     and (tracker.opp_id or tracker.opp_nick)
-                                    and (time.time() - tracker.hero_just_acted_ts > 1.5)
-                                    and (time.time() - tracker.ws_action_ts > 1.2)
+                                    and (time.time() - tracker.hero_just_acted_ts > 1.2)
+                                    and (time.time() - tracker.ws_action_ts > 1.0)
                                 ):
                                     profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "CHECK", calle=tracker.current_street, hand_id=tracker.hand_number)
                             elif "cards-classic-assets" in url and url.endswith(".svg"):
@@ -2388,6 +2500,12 @@ def main():
                         # Prevención de duplicados: Si acabamos de actuar en esta misma calle/rango de mano hace <2.5s, no consultar de nuevo
                         if es_mi_turno and turno_street_key == ultimo_mano_street_key and (time.time() - tracker.hero_just_acted_ts < 2.5):
                             es_mi_turno = False
+
+                        # Guardia anti-turnos huérfanos: si no hay cartas de Hero ni botones de acción,
+                        # no es un turno jugable (mesa finalizada, eliminado o modal de fin de partida activo).
+                        if es_mi_turno and not mis_cartas and not botones:
+                            es_mi_turno = False
+                            tracker.http_turn_signal = False
 
                         # CASO 1: ES NUESTRO TURNO Y AÚN NO HEMOS CONSULTADO A GEMINI PARA ESTE TURNO
                         if es_mi_turno and turno_id_actual != ultimo_turno_id:

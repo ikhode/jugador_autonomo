@@ -334,7 +334,7 @@ class PokerAnalyticsLogger:
             opp_id = str(snap["opp_id"] or self.active_hand["opponent_id"] or "")
             opp_nick = str(snap["opp_nick"] or perfil_rival.get("nickname") or self.active_hand["opponent_nick"] or "")
 
-            pos_raw = str(snap["position_name"] or self.active_hand["position"] or "DESCONOCIDA").upper()
+            pos_raw = str(snap.get("position_name") or dom.get("posicion") or self.active_hand["position"] or "").upper()
             if "DEALER" in pos_raw or "BUTTON" in pos_raw or "BTN" in pos_raw:
                 pos = "BTN"
             elif "SB" in pos_raw or "SMALL" in pos_raw:
@@ -342,7 +342,9 @@ class PokerAnalyticsLogger:
             elif "BB" in pos_raw or "BIG" in pos_raw:
                 pos = "BB"
             else:
-                pos = "DESCONOCIDA"
+                pos = str(dom.get("posicion") or "BTN").upper()
+                if pos not in ("BTN", "SB", "BB"):
+                    pos = "BTN"
 
             # Evitar incrementar el índice si se registra dos veces el mismo estado de turno
             turn_signature = f"{street}|{raw_hole_cards}|{board}|{pot_size}|{to_call}"
@@ -605,6 +607,14 @@ class PokerAnalyticsLogger:
         hole_cards = str(h.get("hole_cards") or "").strip()
         if not hole_cards and h.get("decision_count", 0) == 0:
             return None
+
+        # Descartar manos duplicadas/fantasmas sin decisiones y sin cambio de fichas en vivo
+        if h.get("decision_count", 0) == 0 and not h.get("is_synthetic"):
+            res_upper_test = str(h.get("resultado_str") or "").upper()
+            won_test = h.get("explicit_won") or any(k in res_upper_test for k in ("GANAD", "WON", "COBRADO"))
+            net_test = float(h.get("explicit_net_chips") or 0.0)
+            if not won_test and net_test == 0.0:
+                return None
 
         res_upper = str(h.get("resultado_str") or "").upper()
         won = h.get("explicit_won")

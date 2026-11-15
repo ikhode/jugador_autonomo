@@ -119,6 +119,8 @@ def classify_error(err: Exception) -> str:
     low = msg.lower()
     if "deadline" in low and "too short" in low:
         return "DEADLINE_TOO_SHORT"
+    if "401" in msg or "unauthorized" in low:
+        return "UNAUTHORIZED"
     if "403" in msg or "permission_denied" in low or "does not have permission" in low:
         return "PERMISSION_DENIED"
     if "504" in msg or "deadline_exceeded" in low:
@@ -172,7 +174,7 @@ class ModelPolicy:
         st = self._circuits.setdefault(model, _CircuitState())
         st.consecutive_failures += 1
         st.last_error_kind = err_kind
-        if err_kind in ("NOT_FOUND_404", "PERMISSION_DENIED", "DEADLINE_TOO_SHORT"):
+        if err_kind in ("NOT_FOUND_404", "PERMISSION_DENIED", "DEADLINE_TOO_SHORT", "UNAUTHORIZED"):
             st.open_until = t + self.cooldown_404_sec
         elif err_kind == "DAILY_QUOTA":
             st.open_until = t + self.cooldown_daily_sec
@@ -205,7 +207,11 @@ def build_table_input(dom_data: Optional[dict], decision_uid: str = "", hand_uid
     gto_pre = dom.get("gto_preflop") or {}
     gto_tex = dom.get("gto_textura") or {}
     raw_opts = str(dom.get("opciones_disponibles") or dom.get("botones_visibles") or "").upper()
-    opts = [tok.strip() for tok in re.split(r"[|,\s]+", raw_opts) if tok.strip() in ALL_ACTIONS]
+    raw_norm = re.sub(r"\bALL[\s\-_]+IN\b", "ALL_IN", raw_opts, flags=re.I)
+    raw_norm = re.sub(r"\bALLIN\b", "ALL_IN", raw_norm, flags=re.I)
+    raw_norm = re.sub(r"[,|;]+", " ", raw_norm)
+    toks = [tok.strip() for tok in raw_norm.split() if tok.strip()]
+    opts = [t for t in toks if t in ALL_ACTIONS]
     mis_c = dom.get("mis_cartas", [])
     com_c = dom.get("cartas_comunitarias", [])
     return PokerTableInput(
@@ -339,9 +345,13 @@ def render_prompt(dom_data: Optional[dict], prompt_version: str, perfil_rival_st
 
 def validate_legality(decision: PokerDecision, table_input: PokerTableInput) -> Tuple[bool, PokerDecision, str]:
     """Valida legalidad básica de la acción devuelta por el LLM."""
-    acc = "ALL_IN" if decision.accion == "ALLIN" else decision.accion
+    acc = "ALL_IN" if decision.accion in ("ALLIN", "ALL_IN") else decision.accion
     decision.accion = acc  # type: ignore[assignment]
     opts = set(table_input.opciones_legales)
+    if "ALLIN" in opts:
+        opts.add("ALL_IN")
+    if "ALL_IN" in opts:
+        opts.add("ALLIN")
 
     if acc == "FOLD" and "CHECK" in opts and table_input.a_igualar_bb <= 0:
         decision.accion = "CHECK"
@@ -530,8 +540,8 @@ class AILayer:
         if hasattr(types, "ThinkingConfig"):
             gen_config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
 
-        # Timeout acotado por llamada a 3.0s para conmutar inmediatamente si Gemini tarda
-        call_timeout = min(3.0, max(1.0, timeout_sec)) if timeout_sec > 1.0 else timeout_sec
+        # Timeout acotado por llamada respetando el presupuesto total (hasta 11.5s)
+        call_timeout = min(11.5, max(1.5, timeout_sec)) if timeout_sec > 1.5 else timeout_sec
 
         def _do_gemini_call():
             return self._client.models.generate_content(
