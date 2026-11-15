@@ -1023,6 +1023,33 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
         confianza=0.80
     )
 
+def obtener_o_crear_contexto(p, user_data_dir):
+    cdp_port = getattr(config, "CDP_PORT", 9222)
+    cdp_url = f"http://127.0.0.1:{cdp_port}"
+
+    # 1. Intentar reconectar a un navegador Chromium ya abierto vía CDP (Remote Debugging)
+    try:
+        import urllib.request
+        urllib.request.urlopen(f"{cdp_url}/json/version", timeout=1.0)
+        print(f"⚡ [RECONEXIÓN CDP OK] Navegador Chromium en ejecución detectado (puerto {cdp_port}). Reanudando control instantáneo del navegador...")
+        browser = p.chromium.connect_over_cdp(cdp_url)
+        context = browser.contexts[0] if browser.contexts else browser.new_context()
+        return context, True
+    except Exception:
+        pass
+
+    # 2. Si no hay navegador en ejecución, lanzar una nueva instancia persistente con puerto CDP habilitado
+    print(f"🚀 Iniciando navegador Playwright (Chromium Persistente con puerto CDP {cdp_port})...")
+    args = [f"--remote-debugging-port={cdp_port}"]
+    context = p.chromium.launch_persistent_context(
+        user_data_dir=user_data_dir,
+        headless=config.HEADLESS,
+        slow_mo=config.SLOW_MO,
+        viewport={"width": 1280, "height": 720},
+        args=args
+    )
+    return context, False
+
 def main():
     agent = PokerAgent()
     if analytics_logger is not None:
@@ -1037,15 +1064,15 @@ def main():
 
     try:
         with sync_playwright() as p:
-            print("🚀 Iniciando navegador Playwright (Chromium Persistente)...")
-            context = p.chromium.launch_persistent_context(
-                user_data_dir=user_data_dir,
-                headless=config.HEADLESS,
-                slow_mo=config.SLOW_MO,
-                viewport={"width": 1280, "height": 720}
-            )
-
+            context, es_reconectado = obtener_o_crear_contexto(p, user_data_dir)
             context.add_init_script(JS_INICIALIZAR_MUTATION_OBSERVER)
+
+            if es_reconectado:
+                for pg in context.pages:
+                    try:
+                        pg.evaluate(JS_INICIALIZAR_MUTATION_OBSERVER)
+                    except Exception:
+                        pass
 
             def configurar_interceptores(target_page):
                 try:
@@ -1204,11 +1231,13 @@ def main():
             context.on("page", on_new_page)
             print("🕵️ Interceptor de WebSockets, Red y Sonidos activado globalmente.")
 
-            # 1. Login inicial
-            hacer_login(page)
-
-            # 2. Navegación al juego
-            page = navegar_al_juego(page)
+            if es_reconectado and es_mesa_activa_o_turno(page):
+                print("✨ [RECONEXIÓN INSTANTÁNEA] Mesa activa o turno detectado en el navegador recuperado. Omitiendo login y navegación.")
+            else:
+                # 1. Login inicial
+                hacer_login(page)
+                # 2. Navegación al juego
+                page = navegar_al_juego(page)
 
             print("\n⚡ Bot de Póquer Autónomo Reactivo por Eventos ACTIVO.")
             print("Presiona Ctrl + C en la terminal para detener el bot.\n")
@@ -1220,174 +1249,175 @@ def main():
             ultimo_modal_id = None
             ultimo_tiempo_actividad = time.time()
 
-            while True:
-                try:
-                    if page.is_closed():
-                        print("🔄 Pestaña actual cerrada. Recuperando pestaña activa del contexto...")
-                        pages_activas = [p for p in context.pages if not p.is_closed()]
-                        if pages_activas:
-                            page = pages_activas[-1]
-                            page.bring_to_front()
-                        else:
-                            page = context.new_page()
-                            configurar_interceptores(page)
-                            hacer_login(page)
+            try:
+                while True:
+                    try:
+                        if page.is_closed():
+                            print("🔄 Pestaña actual cerrada. Recuperando pestaña activa del contexto...")
+                            pages_activas = [p for p in context.pages if not p.is_closed()]
+                            if pages_activas:
+                                page = pages_activas[-1]
+                                page.bring_to_front()
+                            else:
+                                page = context.new_page()
+                                configurar_interceptores(page)
+                                hacer_login(page)
 
-                        page = navegar_al_juego(page)
-                        ultimo_tiempo_actividad = time.time()
-                        continue
-
-                    target_mesa = obtener_target_mesa(page)
-                    esperar_sincronizacion_turno(target_mesa, timeout_max_ms=1200)
-
-                    # Si el recuadro "¿Seguro que quieres foldear?" está en pantalla, clic inmediato en Check gratis
-                    if resolver_popup_fold_check_gratis(target_mesa):
-                        ultimo_tiempo_actividad = time.time()
-                        time.sleep(0.4)
-                        continue
-
-                    dom_data = target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or {}
-
-                    # Si llegó la señal de audio my_turn.mp3 pero los botones del DOM aún están renderizándose, esperar hasta 450ms
-                    if tracker.http_turn_signal and not dom_data.get('botones_visibles'):
-                        try:
-                            target_mesa.wait_for_selector("#FOLD, #CHECK, #CALL, #BET, #RAISE, .action-button", state="visible", timeout=450)
-                        except Exception:
-                            time.sleep(0.25)
-                        dom_data = target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or {}
-
-                    es_mi_turno = bool(dom_data.get('es_mi_turno') or tracker.http_turn_signal)
-                    if es_mi_turno:
-                        ultimo_tiempo_actividad = time.time()
-                        dom_data["es_mi_turno"] = True
-                        if tracker.http_turn_signal:
-                            tracker.http_turn_signal = False
-
-                    dom_data["historial_mano"] = tracker.obtener_contexto_completo()
-                    dom_data["perfil_rival"] = profiler.obtener_perfil_explotativo(tracker.opp_id, tracker.opp_nick)
-
-                    mis_cartas = dom_data.get('mis_cartas', '') or " ".join(tracker.my_cards)
-                    if tracker.current_street == "PREFLOP":
-                        comunitarias = ""
-                        tracker.community_cards.clear()
-                    else:
-                        comunitarias = dom_data.get('cartas_comunitarias', '') or " ".join(tracker.community_cards)
-
-                    if comunitarias and tracker.current_street == "PREFLOP":
-                        tracker.current_street = "POSTFLOP"
-
-                    bote = dom_data.get('bote', '') or tracker.last_pot or 0
-                    botones = dom_data.get('botones_visibles', '') or dom_data.get('opciones_disponibles', '')
-                    modales_o_botones = " | ".join(filter(None, [botones, dom_data.get('modales_visibles', '')]))
-
-                    dom_data["mis_cartas"] = mis_cartas
-                    dom_data["cartas_comunitarias"] = comunitarias
-                    dom_data["bote"] = bote
-                    dom_data["gto_preflop"] = clasificar_mano_preflop(mis_cartas)
-                    dom_data["gto_math"] = calcular_pot_odds_y_sizing(bote, dom_data.get('a_igualar'), dom_data.get('mi_stack'))
-                    dom_data["gto_textura"] = analizar_textura_mesa_y_blockers(mis_cartas, comunitarias)
-                    dom_data["gto_frecuencia"] = generar_frecuencia_mixta_gto()
-                    dom_data["gto_combinacion"] = evaluar_combinacion_mano_y_mesa(mis_cartas, comunitarias)
-
-                    turno_id_actual = f"{mis_cartas}|{comunitarias}|{bote}|{botones}"
-                    turno_street_key = (tracker.hand_number, tracker.current_street, mis_cartas, comunitarias)
-
-                    # Prevención de duplicados: Si acabamos de actuar en esta misma calle/rango de mano hace <2.5s, no consultar de nuevo
-                    if es_mi_turno and turno_street_key == ultimo_mano_street_key and (time.time() - tracker.hero_just_acted_ts < 2.5):
-                        es_mi_turno = False
-
-                    # CASO 1: ES NUESTRO TURNO Y AÚN NO HEMOS CONSULTADO A GEMINI PARA ESTE TURNO
-                    if es_mi_turno and turno_id_actual != ultimo_turno_id:
-                        ultimo_turno_id = turno_id_actual
-                        ultimo_mano_street_key = turno_street_key
-                        ultimo_tiempo_actividad = time.time()
-
-                        owner_page = getattr(target_mesa, 'page', page)
-                        try:
-                            if len(context.pages) > 1 and not owner_page.is_closed():
-                                owner_page.bring_to_front()
-                        except Exception:
-                            pass
-                        screenshot_bytes = owner_page.screenshot(type="jpeg", quality=75)
-
-                        print(f"\n--- [Turno Hero #{ciclo}] 🎴 Mis Cartas: {mis_cartas or 'N/A'} | Mesa: {comunitarias or '-'} | Bote: {bote} ---")
-                        print("🤖 Consultando a Gemini AI (1 consulta única, timeout máx 4.5s)...")
-
-                        decision = None
-                        decision_source = "gemini"
-                        t0 = time.time()
-                        try:
-                            decision = consultar_gemini_con_timeout(agent, screenshot_bytes, dom_data=dom_data, timeout_seg=4.5)
-                        except Exception as e:
-                            print(f"⚠️ Excepción al consultar Gemini AI: {e}")
-
-                        if not decision or decision.accion in ("WAIT", "START_GAME", "REPLAY"):
-                            print("🛡️ [RESPALDO DE SEGURIDAD 0ms] Ejecutando acción defensiva rápida...")
-                            decision = decidir_accion_rapida(dom_data)
-                            decision_source = "gto_fallback_0ms"
-
-                        dt = time.time() - t0
-                        print(f"⚡ [DECISIÓN IA ({dt:.2f}s)]: {decision.accion} | Confianza: {decision.confianza:.2f} | {decision.evaluacion}")
-
-                        accion_ejecutada = ejecutar_accion(target_mesa, decision, dom_data=dom_data)
-                        if analytics_logger is not None:
-                            try:
-                                analytics_logger.registrar_decision(
-                                    dom_data=dom_data,
-                                    decision=decision,
-                                    executed_action=accion_ejecutada,
-                                    decision_source=decision_source,
-                                    response_time_ms=dt * 1000.0,
-                                    hand_number=tracker.hand_number,
-                                    position_name=tracker.position_name,
-                                    opp_id=tracker.opp_id,
-                                    opp_nick=tracker.opp_nick,
-                                )
-                            except Exception:
-                                pass
-                        time.sleep(0.55)
-                        ciclo += 1
-
-                    # CASO 2: MODAL O MESA FINALIZADA DETECTADA (Fin de partida / Eliminado 'Vacío' / Replay / Sit-Out / Iniciar partida / PopupCheckGratis)
-                    elif any(b in modales_o_botones for b in ['PopupCheckGratis', 'MesaFinalizadaVacia', 'Jugar de nuevo', 'Replay', 'Volver a jugar', 'Aceptar', 'Jugar Poker', 'Jugar']):
-                        if 'PopupCheckGratis' in modales_o_botones:
-                            resolver_popup_fold_check_gratis(target_mesa)
+                            page = navegar_al_juego(page)
                             ultimo_tiempo_actividad = time.time()
                             continue
-                        if 'MesaFinalizadaVacia' in modales_o_botones or modales_o_botones != ultimo_modal_id:
-                            ultimo_modal_id = None if 'MesaFinalizadaVacia' in modales_o_botones else modales_o_botones
+
+                        target_mesa = obtener_target_mesa(page)
+                        esperar_sincronizacion_turno(target_mesa, timeout_max_ms=1200)
+
+                        # Si el recuadro "¿Seguro que quieres foldear?" está en pantalla, clic inmediato en Check gratis
+                        if resolver_popup_fold_check_gratis(target_mesa):
                             ultimo_tiempo_actividad = time.time()
-                            print(f"🔄 [MODAL / MESA FINALIZADA DETECTADA ({modales_o_botones})] Reaccionando en automático para iniciar nueva partida...")
+                            time.sleep(0.4)
+                            continue
 
-                            if 'Jugar de nuevo' in modales_o_botones or 'Replay' in modales_o_botones or 'Volver a jugar' in modales_o_botones:
-                                if not clicar_texto_modal_universal(target_mesa, ["Jugar de nuevo", "Replay", "Volver a jugar"], "Botón Jugar de Nuevo"):
-                                    intentar_click(target_mesa, config.SELECTORS.get("btn_replay", config.SELECTORS["replay"]), "Botón Jugar de Nuevo", timeout=2000)
-                            elif 'Jugar Poker' in modales_o_botones or 'Jugar' in modales_o_botones:
-                                if not intentar_click(target_mesa, config.SELECTORS["start_match_btn"], "Botón Jugar Poker", timeout=2000):
-                                    clicar_texto_modal_universal(target_mesa, ["Jugar Poker", "Jugar"], "Botón Jugar Poker")
-                            elif 'Aceptar' in modales_o_botones:
-                                if not intentar_click(target_mesa, "#general-popup-button-action-OK", "Botón Aceptar Sit-out", timeout=1500):
-                                    clicar_texto_modal_universal(target_mesa, ["Aceptar", "OK"], "Botón Aceptar")
-                            elif 'MesaFinalizadaVacia' in modales_o_botones:
-                                salir_de_mesa_vacia_o_finalizada(target_mesa, page, context)
+                        dom_data = target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or {}
 
-                            time.sleep(1.8)
-                            tracker.reset_mano()
+                        # Si llegó la señal de audio my_turn.mp3 pero los botones del DOM aún están renderizándose, esperar hasta 450ms
+                        if tracker.http_turn_signal and not dom_data.get('botones_visibles'):
+                            try:
+                                target_mesa.wait_for_selector("#FOLD, #CHECK, #CALL, #BET, #RAISE, .action-button", state="visible", timeout=450)
+                            except Exception:
+                                time.sleep(0.25)
+                            dom_data = target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or {}
 
-                    # CASO 3: AUTORRECUPERACIÓN SI ESTAMOS EN EL LOBBY SIN ENTRAR A MESA HACE MÁS DE 60 SEGUNDOS
-                    elif not es_mi_turno and not mis_cartas and (time.time() - ultimo_tiempo_actividad > 60):
-                        ultimo_tiempo_actividad = time.time()
-                        print("⏳ Tiempo de inactividad detectado en lobby. Re-ejecutando inicio de torneo automático...")
-                        page = navegar_al_juego(page)
+                        es_mi_turno = bool(dom_data.get('es_mi_turno') or tracker.http_turn_signal)
+                        if es_mi_turno:
+                            ultimo_tiempo_actividad = time.time()
+                            dom_data["es_mi_turno"] = True
+                            if tracker.http_turn_signal:
+                                tracker.http_turn_signal = False
 
-                    else:
-                        time.sleep(0.05)
+                        dom_data["historial_mano"] = tracker.obtener_contexto_completo()
+                        dom_data["perfil_rival"] = profiler.obtener_perfil_explotativo(tracker.opp_id, tracker.opp_nick)
 
-                except KeyboardInterrupt:
-                    raise
-                except Exception as e:
-                    print(f"ℹ️ Nota de autorrecuperación en el bucle: {e}")
-                    time.sleep(0.5)
+                        mis_cartas = dom_data.get('mis_cartas', '') or " ".join(tracker.my_cards)
+                        if tracker.current_street == "PREFLOP":
+                            comunitarias = ""
+                            tracker.community_cards.clear()
+                        else:
+                            comunitarias = dom_data.get('cartas_comunitarias', '') or " ".join(tracker.community_cards)
+
+                        if comunitarias and tracker.current_street == "PREFLOP":
+                            tracker.current_street = "POSTFLOP"
+
+                        bote = dom_data.get('bote', '') or tracker.last_pot or 0
+                        botones = dom_data.get('botones_visibles', '') or dom_data.get('opciones_disponibles', '')
+                        modales_o_botones = " | ".join(filter(None, [botones, dom_data.get('modales_visibles', '')]))
+
+                        dom_data["mis_cartas"] = mis_cartas
+                        dom_data["cartas_comunitarias"] = comunitarias
+                        dom_data["bote"] = bote
+                        dom_data["gto_preflop"] = clasificar_mano_preflop(mis_cartas)
+                        dom_data["gto_math"] = calcular_pot_odds_y_sizing(bote, dom_data.get('a_igualar'), dom_data.get('mi_stack'))
+                        dom_data["gto_textura"] = analizar_textura_mesa_y_blockers(mis_cartas, comunitarias)
+                        dom_data["gto_frecuencia"] = generar_frecuencia_mixta_gto()
+                        dom_data["gto_combinacion"] = evaluar_combinacion_mano_y_mesa(mis_cartas, comunitarias)
+
+                        turno_id_actual = f"{mis_cartas}|{comunitarias}|{bote}|{botones}"
+                        turno_street_key = (tracker.hand_number, tracker.current_street, mis_cartas, comunitarias)
+
+                        # Prevención de duplicados: Si acabamos de actuar en esta misma calle/rango de mano hace <2.5s, no consultar de nuevo
+                        if es_mi_turno and turno_street_key == ultimo_mano_street_key and (time.time() - tracker.hero_just_acted_ts < 2.5):
+                            es_mi_turno = False
+
+                        # CASO 1: ES NUESTRO TURNO Y AÚN NO HEMOS CONSULTADO A GEMINI PARA ESTE TURNO
+                        if es_mi_turno and turno_id_actual != ultimo_turno_id:
+                            ultimo_turno_id = turno_id_actual
+                            ultimo_mano_street_key = turno_street_key
+                            ultimo_tiempo_actividad = time.time()
+
+                            owner_page = getattr(target_mesa, 'page', page)
+                            try:
+                                if len(context.pages) > 1 and not owner_page.is_closed():
+                                    owner_page.bring_to_front()
+                            except Exception:
+                                pass
+                            screenshot_bytes = owner_page.screenshot(type="jpeg", quality=75)
+
+                            print(f"\n--- [Turno Hero #{ciclo}] 🎴 Mis Cartas: {mis_cartas or 'N/A'} | Mesa: {comunitarias or '-'} | Bote: {bote} ---")
+                            print("🤖 Consultando a Gemini AI (1 consulta única, timeout máx 4.5s)...")
+
+                            decision = None
+                            decision_source = "gemini"
+                            t0 = time.time()
+                            try:
+                                decision = consultar_gemini_con_timeout(agent, screenshot_bytes, dom_data=dom_data, timeout_seg=4.5)
+                            except Exception as e:
+                                print(f"⚠️ Excepción al consultar Gemini AI: {e}")
+
+                            if not decision or decision.accion in ("WAIT", "START_GAME", "REPLAY"):
+                                print("🛡️ [RESPALDO DE SEGURIDAD 0ms] Ejecutando acción defensiva rápida...")
+                                decision = decidir_accion_rapida(dom_data)
+                                decision_source = "gto_fallback_0ms"
+
+                            dt = time.time() - t0
+                            print(f"⚡ [DECISIÓN IA ({dt:.2f}s)]: {decision.accion} | Confianza: {decision.confianza:.2f} | {decision.evaluacion}")
+
+                            accion_ejecutada = ejecutar_accion(target_mesa, decision, dom_data=dom_data)
+                            if analytics_logger is not None:
+                                try:
+                                    analytics_logger.registrar_decision(
+                                        dom_data=dom_data,
+                                        decision=decision,
+                                        executed_action=accion_ejecutada,
+                                        decision_source=decision_source,
+                                        response_time_ms=dt * 1000.0,
+                                        hand_number=tracker.hand_number,
+                                        position_name=tracker.position_name,
+                                        opp_id=tracker.opp_id,
+                                        opp_nick=tracker.opp_nick,
+                                    )
+                                except Exception:
+                                    pass
+                            time.sleep(0.55)
+                            ciclo += 1
+
+                        # CASO 2: MODAL O MESA FINALIZADA DETECTADA (Fin de partida / Eliminado 'Vacío' / Replay / Sit-Out / Iniciar partida / PopupCheckGratis)
+                        elif any(b in modales_o_botones for b in ['PopupCheckGratis', 'MesaFinalizadaVacia', 'Jugar de nuevo', 'Replay', 'Volver a jugar', 'Aceptar', 'Jugar Poker', 'Jugar']):
+                            if 'PopupCheckGratis' in modales_o_botones:
+                                resolver_popup_fold_check_gratis(target_mesa)
+                                ultimo_tiempo_actividad = time.time()
+                                continue
+                            if 'MesaFinalizadaVacia' in modales_o_botones or modales_o_botones != ultimo_modal_id:
+                                ultimo_modal_id = None if 'MesaFinalizadaVacia' in modales_o_botones else modales_o_botones
+                                ultimo_tiempo_actividad = time.time()
+                                print(f"🔄 [MODAL / MESA FINALIZADA DETECTADA ({modales_o_botones})] Reaccionando en automático para iniciar nueva partida...")
+
+                                if 'Jugar de nuevo' in modales_o_botones or 'Replay' in modales_o_botones or 'Volver a jugar' in modales_o_botones:
+                                    if not clicar_texto_modal_universal(target_mesa, ["Jugar de nuevo", "Replay", "Volver a jugar"], "Botón Jugar de Nuevo"):
+                                        intentar_click(target_mesa, config.SELECTORS.get("btn_replay", config.SELECTORS["replay"]), "Botón Jugar de Nuevo", timeout=2000)
+                                elif 'Jugar Poker' in modales_o_botones or 'Jugar' in modales_o_botones:
+                                    if not intentar_click(target_mesa, config.SELECTORS["start_match_btn"], "Botón Jugar Poker", timeout=2000):
+                                        clicar_texto_modal_universal(target_mesa, ["Jugar Poker", "Jugar"], "Botón Jugar Poker")
+                                elif 'Aceptar' in modales_o_botones:
+                                    if not intentar_click(target_mesa, "#general-popup-button-action-OK", "Botón Aceptar Sit-out", timeout=1500):
+                                        clicar_texto_modal_universal(target_mesa, ["Aceptar", "OK"], "Botón Aceptar")
+                                elif 'MesaFinalizadaVacia' in modales_o_botones:
+                                    salir_de_mesa_vacia_o_finalizada(target_mesa, page, context)
+
+                                time.sleep(1.8)
+                                tracker.reset_mano()
+
+                        # CASO 3: AUTORRECUPERACIÓN SI ESTAMOS EN EL LOBBY SIN ENTRAR A MESA HACE MÁS DE 60 SEGUNDOS
+                        elif not es_mi_turno and not mis_cartas and (time.time() - ultimo_tiempo_actividad > 60):
+                            ultimo_tiempo_actividad = time.time()
+                            print("⏳ Tiempo de inactividad detectado en lobby. Re-ejecutando inicio de torneo automático...")
+                            page = navegar_al_juego(page)
+
+                        else:
+                            time.sleep(0.05)
+
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as e:
+                        print(f"ℹ️ Nota de autorrecuperación en el bucle: {e}")
+                        time.sleep(0.5)
 
             except KeyboardInterrupt:
                 print("\n🛑 Bot detenido por el usuario (Ctrl + C).")

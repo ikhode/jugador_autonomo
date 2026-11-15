@@ -1,7 +1,7 @@
 {
-  "exported_at": "2026-11-15 00:29:58",
+  "exported_at": "2026-11-15 01:00:03",
   "traceability": {
-    "code_hash": "7c05f428b0f93117",
+    "code_hash": "98d244e94aad6bdb",
     "db_path": "logs\\poker_stats.db",
     "filters_applied": {}
   },
@@ -172,7 +172,7 @@
       "modified_params": "{}",
       "parent_version": "1.2",
       "config_hash": "bfd64a71fdd7",
-      "code_hash": "7c05f428b0f93117",
+      "code_hash": "98d244e94aad6bdb",
       "random_seed": 20261114,
       "experiment_conditions": "{}",
       "notes": "Motor completo actual: distingue Pocket Pair/Set oculto de Board Pair pública, usa blockers de As/Rey y sizings 33%/66%/100%.",
@@ -576,13 +576,13 @@
   ],
   "sessions": [
     {
-      "session_id": "ses_20261115_002932_549574",
+      "session_id": "ses_20261115_010002_14b3e0",
       "version_id": "1.3",
-      "started_at": "2026-11-15 00:29:32",
+      "started_at": "2026-11-15 01:00:02",
       "ended_at": null,
       "mode": "live",
       "is_synthetic": 0,
-      "code_hash": "7c05f428b0f93117",
+      "code_hash": "98d244e94aad6bdb",
       "model_name": "gemini-2.5-flash",
       "initial_bankroll": 1500.0,
       "final_bankroll": 1500.0,
@@ -593,10 +593,27 @@
       "status": "ACTIVE"
     },
     {
+      "session_id": "ses_20261115_002932_549574",
+      "version_id": "1.3",
+      "started_at": "2026-11-15 00:29:32",
+      "ended_at": "2026-11-15 00:31:06",
+      "mode": "live",
+      "is_synthetic": 0,
+      "code_hash": "7c05f428b0f93117",
+      "model_name": "gemini-2.5-flash",
+      "initial_bankroll": 1500.0,
+      "final_bankroll": 1500.0,
+      "buy_in_total": 500.0,
+      "big_blind": 20.0,
+      "hands_played": 0,
+      "net_profit_chips": 0.0,
+      "status": "COMPLETED"
+    },
+    {
       "session_id": "ses_20261115_002921_2043c6",
       "version_id": "1.3",
       "started_at": "2026-11-15 00:29:21",
-      "ended_at": "2026-11-15 00:29:58",
+      "ended_at": "2026-11-15 00:30:04",
       "mode": "live",
       "is_synthetic": 0,
       "code_hash": "7c05f428b0f93117",
@@ -607,7 +624,7 @@
       "big_blind": 20.0,
       "hands_played": 1,
       "net_profit_chips": 0.0,
-      "status": "ACTIVE"
+      "status": "COMPLETED"
     },
     {
       "session_id": "ses_20261115_002730_639655",
@@ -9970,7 +9987,7 @@
           "parent_version": "1.2",
           "modified_params": {},
           "config_hash": "bfd64a71fdd7",
-          "code_hash": "7c05f428b0f93117",
+          "code_hash": "98d244e94aad6bdb",
           "random_seed": 20261114,
           "experiment_conditions": {},
           "hands_evaluated": 121,
@@ -10303,14 +10320,14 @@
       },
       "stat_processing_latency": {
         "count": 1,
-        "mean_ms": 181.845,
-        "min_ms": 181.845,
-        "p50_ms": 181.845,
-        "p95_ms": 181.845,
-        "p99_ms": 181.845,
-        "max_ms": 181.845
+        "mean_ms": 158.564,
+        "min_ms": 158.564,
+        "p50_ms": 158.564,
+        "p95_ms": 158.564,
+        "p99_ms": 158.564,
+        "max_ms": 158.564
       },
-      "memory_rss_mb": 201.45,
+      "memory_rss_mb": 168.91,
       "storage_errors_total": 0,
       "dropped_records_total": 0,
       "max_pending_queue_tasks": 0,
@@ -10321,7 +10338,7 @@
         "duplicate_hands_groups": 0,
         "duplicate_decisions_groups": 0,
         "db_size_kb": 1632.0,
-        "code_hash": "7c05f428b0f93117",
+        "code_hash": "98d244e94aad6bdb",
         "counts": {
           "live_hands": 1,
           "benchmark_hands": 480,
