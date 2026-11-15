@@ -21,6 +21,10 @@ from poker_gto_engine import (
     decidir_por_ev,
 )
 from analytics_logger import PokerAnalyticsLogger
+from strategic_engine import StrategicEngine
+from opponent_model import OpponentModel
+from game_state_manager import GameStateManager
+from decision_maker import DecisionMaker
 
 # Pool de subprocesos persistente global para cero bloqueos de E/S o red
 bg_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -1795,6 +1799,77 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
 
     return accion_ejecutada
 
+_local_strategic_engine = None
+_local_opponent_model = None
+_local_game_state_mgr = None
+_local_decision_maker = None
+
+def get_local_decision_maker():
+    global _local_strategic_engine, _local_opponent_model, _local_game_state_mgr, _local_decision_maker
+    if _local_decision_maker is None:
+        _local_strategic_engine = StrategicEngine(strategy_model=None)
+        _local_opponent_model = OpponentModel(model_type="random_forest")
+        # Train with baseline dummy data if not already trained (10 features)
+        import numpy as np
+        X_train = np.array([
+            [50, 10, 0.166, 0, 0.5, 0.25, 0.15, 1, 2, 0],
+            [200, 50, 0.2, 3, 0.7, 0.25, 0.15, 0, 1, 3]
+        ])
+        y_train = np.array([0, 1])
+        _local_opponent_model.train(X_train, y_train)
+        _local_game_state_mgr = GameStateManager()
+        _local_decision_maker = DecisionMaker(_local_strategic_engine, _local_opponent_model)
+    return _local_game_state_mgr, _local_decision_maker
+
+def decidir_accion_local(dom_data: dict) -> PokerDecision:
+    if not dom_data or not dom_data.get('es_mi_turno'):
+        return PokerDecision(
+            evaluacion="No es nuestro turno (Local Model)",
+            estrategia_competitiva="Esperando acción del rival con modelos locales",
+            estado_pantalla="EN_MESA_JUEGO",
+            es_mi_turno=False,
+            accion="WAIT",
+            monto_apuesta=0,
+            confianza=0.0
+        )
+
+    game_state_mgr, decision_maker = get_local_decision_maker()
+
+    pot = _parse_num_dom(dom_data.get('bote'), 0.0)
+    current_bet = _parse_num_dom(dom_data.get('a_igualar'), 0.0)
+    comunitarias_str = (dom_data.get('cartas_comunitarias') or '').strip()
+    board_cards_count = len(comunitarias_str.split()) if comunitarias_str else 0
+
+    game_state = {
+        "pot_size": pot,
+        "current_bet": current_bet,
+        "board_cards_count": board_cards_count,
+        "mis_cartas": dom_data.get('mis_cartas', ''),
+        "cartas_comunitarias": comunitarias_str
+    }
+    game_state_mgr.update_game_state(game_state)
+
+    historical_actions = game_state_mgr.get_historical_actions()
+    opponent_profile = game_state_mgr.get_opponent_profile()
+
+    local_action = decision_maker.make_decision(game_state, historical_actions, opponent_profile)
+
+    base_gto_decision = decidir_accion_rapida(dom_data)
+
+    action_upper = "CHECK"
+    if local_action == "fold":
+        action_upper = "FOLD" if current_bet > 0 else "CHECK"
+    elif local_action == "call":
+        action_upper = "CALL" if current_bet > 0 else "CHECK"
+    elif "raise" in local_action:
+        action_upper = "RAISE" if "RAISE" in str(dom_data.get('botones_visibles', '')).upper() or base_gto_decision.accion == "RAISE" else ("CALL" if current_bet > 0 else "CHECK")
+
+    base_gto_decision.evaluacion = f"⚡ [Local Hybrid AI] Sugerencia: {local_action} -> Ejecutada: {action_upper}"
+    base_gto_decision.estrategia_competitiva = "Modelo local híbrido (CFR Base + Random Forest Opponent Modeling)"
+    base_gto_decision.accion = action_upper
+    base_gto_decision.confianza = 0.95
+    return base_gto_decision
+
 def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
     if not dom_data or not dom_data.get('es_mi_turno'):
         return PokerDecision(
@@ -2551,6 +2626,10 @@ def main():
                                 print("🛡️ [MODO DETERMINISTA] Decidiendo con motor GTO sin invocar LLM...")
                                 decision = decidir_accion_rapida(dom_data)
                                 decision_source = "gto_determinista"
+                            elif modo_activo == "local":
+                                print("🌳 [MODO LOCAL HÍBRIDO] Decidiendo con Motor Estratégico + Random Forest Opponent Model...")
+                                decision = decidir_accion_local(dom_data)
+                                decision_source = "local_hybrid"
                             elif modo_activo == "hibrido":
                                 print("⚖️ [MODO HÍBRIDO] Evaluando motor GTO + EV y consultando LLM...")
                                 motor_dec = decidir_accion_rapida(dom_data)
