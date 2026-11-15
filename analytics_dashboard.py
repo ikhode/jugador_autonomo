@@ -535,44 +535,51 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
                 <span class="badge badge-green">Actualización en vivo a 3s</span>
             </div>
 
-            <div class="grid-2">
-                <!-- Tarjeta 1: Estado de la Mesa -->
-                <div class="card" style="border-left: 4px solid var(--accent-blue);">
-                    <div class="card-title">
-                        <span>🎴 Estado de la Mano Actual (#<span id="live-hand-num">1</span>)</span>
-                        <span class="badge badge-purple" id="live-street-badge">PREFLOP</span>
+            <!-- Estado de la Mano y Capacidad de Mesa -->
+            <div class="card" style="border-left: 4px solid var(--accent-blue); margin-bottom: 16px;">
+                <div class="card-title">
+                    <span>🎴 Estado de la Mano Actual (#<span id="live-hand-num">1</span>) — <span id="live-modalidad" style="color:#38bdf8;">Twister 3-Max</span></span>
+                    <span class="badge badge-purple" id="live-street-badge">PREFLOP</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 12px;">
+                    <div style="background: var(--bg-card-alt); padding: 10px; border-radius: 8px;">
+                        <div style="font-size: 0.72rem; color: var(--text-muted);">MIS CARTAS:</div>
+                        <div style="font-size: 1.15rem; font-weight: 800; color: #38bdf8;" id="live-my-cards">Esperando cartas...</div>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-                        <div style="background: var(--bg-card-alt); padding: 10px; border-radius: 8px;">
-                            <div style="font-size: 0.75rem; color: var(--text-muted);">MIS CARTAS:</div>
-                            <div style="font-size: 1.2rem; font-weight: 800; color: #38bdf8;" id="live-my-cards">Esperando cartas...</div>
-                        </div>
-                        <div style="background: var(--bg-card-alt); padding: 10px; border-radius: 8px;">
-                            <div style="font-size: 0.75rem; color: var(--text-muted);">MESA COMUNITARIA:</div>
-                            <div style="font-size: 1.2rem; font-weight: 800; color: #f59e0b;" id="live-board-cards">Ninguna</div>
-                        </div>
+                    <div style="background: var(--bg-card-alt); padding: 10px; border-radius: 8px;">
+                        <div style="font-size: 0.72rem; color: var(--text-muted);">MESA COMUNITARIA:</div>
+                        <div style="font-size: 1.15rem; font-weight: 800; color: #f59e0b;" id="live-board-cards">Ninguna</div>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #e2e8f0;">
-                        <span>💰 Bote Actual: <strong id="live-pot" style="color:#10b981;">$0</strong></span>
-                        <span>📍 Posición: <strong id="live-pos" style="color:#a855f7;">Desconocida</strong></span>
+                    <div style="background: var(--bg-card-alt); padding: 10px; border-radius: 8px;">
+                        <div style="font-size: 0.72rem; color: var(--text-muted);">ASIENTOS / ACTIVOS / EN MANO:</div>
+                        <div style="font-size: 1.05rem; font-weight: 800; color: #e2e8f0;" id="live-table-counts">0/3 ocup. · 0 act. · 0 en mano</div>
+                    </div>
+                    <div style="background: var(--bg-card-alt); padding: 10px; border-radius: 8px;">
+                        <div style="font-size: 0.72rem; color: var(--text-muted);">OPONENTES REALES:</div>
+                        <div style="font-size: 1.05rem; font-weight: 800; color: #f59e0b;" id="live-opponents-count">0 en mesa (0 en mano)</div>
                     </div>
                 </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 18px; justify-content: space-between; font-size: 0.85rem; color: #e2e8f0;">
+                    <span>💰 Bote Actual: <strong id="live-pot" style="color:#10b981;">$0</strong></span>
+                    <span>📍 Posición Hero: <strong id="live-pos" style="color:#a855f7;">Desconocida</strong></span>
+                    <span>🪑 Asientos Disponibles: <strong id="live-seats-free" style="color:#38bdf8;">-</strong></span>
+                </div>
+            </div>
 
-                <!-- Tarjeta 2: Perfil del Rival -->
-                <div class="card" style="border-left: 4px solid var(--accent-amber);">
-                    <div class="card-title">
-                        <span>👤 Perfil Explotativo del Oponente en Vivo</span>
-                        <span class="badge badge-amber" id="live-opp-style">NUEVO RIVAL</span>
+            <!-- NUEVO PANEL MULTIJUGADOR: PERFILES DE OPONENTES EN VIVO -->
+            <div class="card" style="border-left: 4px solid var(--accent-amber); margin-bottom: 16px;">
+                <div class="card-title" style="flex-wrap: wrap; gap: 10px;">
+                    <span>👥 PERFILES DE OPONENTES EN VIVO</span>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;" id="live-opp-filter-bar">
+                        <button type="button" class="btn-filter-live active" data-live-filter="all" onclick="setLiveOpponentFilter('all')" style="padding:4px 10px; border-radius:6px; border:1px solid var(--border-color); background:#1e293b; color:#f8fafc; cursor:pointer; font-size:0.78rem;">Todos en mesa</button>
+                        <button type="button" class="btn-filter-live" data-live-filter="active" onclick="setLiveOpponentFilter('active')" style="padding:4px 10px; border-radius:6px; border:1px solid var(--border-color); background:#0f172a; color:#94a3b8; cursor:pointer; font-size:0.78rem;">Activos</button>
+                        <button type="button" class="btn-filter-live" data-live-filter="inactive" onclick="setLiveOpponentFilter('inactive')" style="padding:4px 10px; border-radius:6px; border:1px solid var(--border-color); background:#0f172a; color:#94a3b8; cursor:pointer; font-size:0.78rem;">Inactivos / Fold / Ausentes</button>
+                        <button type="button" class="btn-filter-live" data-live-filter="historical" onclick="setLiveOpponentFilter('historical')" style="padding:4px 10px; border-radius:6px; border:1px solid var(--border-color); background:#0f172a; color:#94a3b8; cursor:pointer; font-size:0.78rem;">Perfiles históricos (BDD)</button>
                     </div>
-                    <div style="font-size: 0.95rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;" id="live-opp-name">Oponente no detectado aún</div>
-                    <div style="display: flex; gap: 14px; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px;">
-                        <span>Manos BDD: <strong id="live-opp-hands">0</strong></span>
-                        <span>VPIP: <strong id="live-opp-vpip">0%</strong></span>
-                        <span>PFR: <strong id="live-opp-pfr">0%</strong></span>
-                        <span>AF: <strong id="live-opp-af">1.0</strong></span>
-                    </div>
-                    <div style="font-size: 0.78rem; background: rgba(245, 158, 11, 0.1); border: 1px dashed rgba(245, 158, 11, 0.4); padding: 8px; border-radius: 6px; color: #fbbf24;" id="live-opp-tactic">
-                        Directriz Táctica: Juego equilibrado GTO estándar.
+                </div>
+                <div id="live-opponents-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 12px; margin-top: 8px;">
+                    <div style="background: var(--bg-card-alt); padding: 14px; border-radius: 8px; color: var(--text-muted); font-size: 0.85rem;">
+                        Esperando detección de oponentes en la mesa...
                     </div>
                 </div>
             </div>
@@ -2143,6 +2150,122 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
 
         let lastHandsCount = (RAW_DATA.all_hands || []).length;
         let lastDecisionsCount = (RAW_DATA.all_decisions || []).length;
+        let liveOpponentFilter = 'all';
+
+        function setLiveOpponentFilter(filterName) {{
+            liveOpponentFilter = filterName || 'all';
+            document.querySelectorAll('#live-opp-filter-bar .btn-filter-live').forEach(btn => {{
+                const isAct = btn.getAttribute('data-live-filter') === liveOpponentFilter;
+                btn.style.background = isAct ? '#1e293b' : '#0f172a';
+                btn.style.color = isAct ? '#f8fafc' : '#94a3b8';
+            }});
+            renderLiveSection(RAW_DATA.live_status || {{}}, RAW_DATA.historical_profiles || []);
+        }}
+
+        function _statusBadgeStyle(st) {{
+            const s = (st || 'ACTIVE').toUpperCase();
+            if (s === 'ACTIVE') return 'background:rgba(16,185,129,0.18); color:#34d399; border:1px solid rgba(16,185,129,0.4);';
+            if (s === 'FOLDED') return 'background:rgba(148,163,184,0.18); color:#cbd5e1; border:1px solid rgba(148,163,184,0.35);';
+            if (s === 'SIT_OUT') return 'background:rgba(245,158,11,0.18); color:#fbbf24; border:1px solid rgba(245,158,11,0.4);';
+            if (s === 'DISCONNECTED' || s === 'ELIMINATED') return 'background:rgba(239,68,68,0.18); color:#f87171; border:1px solid rgba(239,68,68,0.4);';
+            return 'background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.35);';
+        }}
+
+        function renderLiveSection(live, historical) {{
+            const tInfo = live.table_info || {{}};
+            const elHandNum = document.getElementById('live-hand-num');
+            if (elHandNum) elHandNum.textContent = live.hand_number || 1;
+            const elMod = document.getElementById('live-modalidad');
+            if (elMod) elMod.textContent = live.modalidad || 'Twister 3-Max';
+            const elStreet = document.getElementById('live-street-badge');
+            if (elStreet) elStreet.textContent = live.current_street || 'PREFLOP';
+            const elMyCards = document.getElementById('live-my-cards');
+            if (elMyCards) elMyCards.textContent = (live.my_cards || []).join(' ') || 'Esperando cartas...';
+            const elBoard = document.getElementById('live-board-cards');
+            if (elBoard) elBoard.textContent = (live.community_cards || []).join(' ') || 'Ninguna';
+            const elPot = document.getElementById('live-pot');
+            if (elPot) elPot.textContent = '$' + (live.last_pot || 0);
+            const elPos = document.getElementById('live-pos');
+            if (elPos) elPos.textContent = live.position_name || 'Desconocida';
+
+            const elCounts = document.getElementById('live-table-counts');
+            if (elCounts) {{
+                elCounts.textContent = `${{tInfo.asientos_ocupados || 0}}/${{tInfo.max_asientos || 3}} ocup. · ${{tInfo.jugadores_activos || 0}} act. · ${{tInfo.jugadores_en_mano || 0}} en mano`;
+            }}
+            const elOppCount = document.getElementById('live-opponents-count');
+            if (elOppCount) {{
+                elOppCount.textContent = `${{tInfo.numero_oponentes_mesa || 0}} en mesa (${{tInfo.numero_oponentes_en_mano || 0}} en mano)`;
+            }}
+            const elFree = document.getElementById('live-seats-free');
+            if (elFree) elFree.textContent = tInfo.asientos_disponibles !== undefined ? tInfo.asientos_disponibles : '-';
+
+            const grid = document.getElementById('live-opponents-grid');
+            if (grid) {{
+                const liveOpps = Array.isArray(live.opponents) ? live.opponents : [];
+                let listToRender = [];
+                if (liveOpponentFilter === 'historical') {{
+                    listToRender = Array.isArray(historical) ? historical : [];
+                }} else if (liveOpponentFilter === 'active') {{
+                    listToRender = liveOpps.filter(o => (o.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
+                }} else if (liveOpponentFilter === 'inactive') {{
+                    listToRender = liveOpps.filter(o => (o.status || 'ACTIVE').toUpperCase() !== 'ACTIVE');
+                }} else {{
+                    listToRender = liveOpps;
+                }}
+
+                if (listToRender.length === 0) {{
+                    const emptyMsg = liveOpponentFilter === 'historical'
+                        ? 'No hay perfiles históricos registrados en la base de datos.'
+                        : 'No hay oponentes que coincidan con este filtro en la mesa actual.';
+                    grid.innerHTML = `<div style="background: var(--bg-card-alt); padding: 14px; border-radius: 8px; color: var(--text-muted); font-size: 0.85rem;">${{emptyMsg}}</div>`;
+                }} else {{
+                    grid.innerHTML = listToRender.map(opp => {{
+                        const st = (opp.status || 'ACTIVE').toUpperCase();
+                        const seatTxt = opp.seat ? `Asiento #${{opp.seat}}` : 'Asiento -';
+                        const stackTxt = opp.stack ? ` · Stack: ${{opp.stack}}` : '';
+                        const turnBadge = opp.is_turn ? `<span class="badge badge-green" style="margin-left:6px;">TURNO</span>` : '';
+                        return `
+                            <div style="background: var(--bg-card-alt); border: 1px solid var(--border-color); border-top: 3px solid #f59e0b; border-radius: 10px; padding: 12px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">
+                                    <div style="font-weight:700; color:#f8fafc; font-size:0.95rem;">
+                                        👤 ${{opp.nickname || opp.player_id || 'Rival'}} <span style="color:var(--text-muted); font-size:0.75rem;">(${{seatTxt}}${{stackTxt}})</span>${{turnBadge}}
+                                    </div>
+                                    <span style="padding:2px 8px; border-radius:999px; font-size:0.72rem; font-weight:700; ${{_statusBadgeStyle(st)}}">${{st}}</span>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:0.78rem;">
+                                    <span class="badge badge-amber">${{opp.estilo || 'Perfil desconocido'}}</span>
+                                    <span style="color:#94a3b8;">Confianza: <strong style="color:#e2e8f0;">${{opp.confianza_nivel || 'MUESTRA INSUFICIENTE'}} (${{opp.confianza_pct || 0}}%)</strong></span>
+                                </div>
+                                <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; font-size:0.76rem; color:var(--text-muted); background:#0b1120; padding:8px; border-radius:6px; margin-bottom:8px;">
+                                    <div>Manos: <strong style="color:#f8fafc;">${{opp.manos || 0}}</strong></div>
+                                    <div>VPIP: <strong style="color:#38bdf8;">${{opp.vpip_pct || 0}}%</strong></div>
+                                    <div>PFR: <strong style="color:#a855f7;">${{opp.pfr_pct || 0}}%</strong></div>
+                                    <div>3-Bet: <strong style="color:#f59e0b;">${{opp.three_bet_pct || 0}}%</strong></div>
+                                    <div>F3B: <strong style="color:#e2e8f0;">${{opp.fold_to_3bet_pct || 0}}%</strong></div>
+                                    <div>AF: <strong style="color:#10b981;">${{opp.agresividad || 1.0}}</strong></div>
+                                    <div>AFq: <strong style="color:#10b981;">${{opp.aggression_freq_pct || 0}}%</strong></div>
+                                    <div>WTSD: <strong style="color:#e2e8f0;">${{opp.wtsd_pct || 0}}%</strong></div>
+                                </div>
+                                <div style="font-size:0.75rem; color:#cbd5e1; margin-bottom:6px;">
+                                    <strong>Tendencia:</strong> ${{opp.tendencia || 'Sin historial observado'}} (WWSF: ${{opp.wwsf_pct || 0}}%)
+                                </div>
+                                <div style="font-size:0.75rem; background:rgba(245,158,11,0.08); border:1px dashed rgba(245,158,11,0.35); padding:7px; border-radius:6px; color:#fbbf24;">
+                                    ${{opp.recomendacion_tactica || 'Muestra insuficiente. Mantener estrategia GTO estándar.'}}
+                                </div>
+                            </div>
+                        `;
+                    }}).join('');
+                }}
+            }}
+
+            const eventsFeed = document.getElementById('live-events-feed');
+            if (eventsFeed && live.live_events && live.live_events.length > 0) {{
+                eventsFeed.innerHTML = live.live_events.map(ev => `<div>${{ev}}</div>`).join('');
+                eventsFeed.scrollTop = eventsFeed.scrollHeight;
+            }}
+        }}
+
+        renderLiveSection(RAW_DATA.live_status || {{}}, RAW_DATA.historical_profiles || []);
 
         async function checkLiveUpdates() {{
             const badge = document.getElementById('liveSyncBadge');
@@ -2151,43 +2274,9 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
                 if (!res.ok) throw new Error('Modo archivo estático');
                 const freshData = await res.json();
 
-                const live = freshData.live_status || {{}};
-                if (live.hand_number) {{
-                    const elHandNum = document.getElementById('live-hand-num');
-                    if (elHandNum) elHandNum.textContent = live.hand_number || 1;
-                    const elStreet = document.getElementById('live-street-badge');
-                    if (elStreet) elStreet.textContent = live.current_street || 'PREFLOP';
-                    const elMyCards = document.getElementById('live-my-cards');
-                    if (elMyCards) elMyCards.textContent = (live.my_cards || []).join(' ') || 'En espera...';
-                    const elBoard = document.getElementById('live-board-cards');
-                    if (elBoard) elBoard.textContent = (live.community_cards || []).join(' ') || 'Ninguna';
-                    const elPot = document.getElementById('live-pot');
-                    if (elPot) elPot.textContent = '$' + (live.last_pot || 0);
-                    const elPos = document.getElementById('live-pos');
-                    if (elPos) elPos.textContent = live.position_name || 'Desconocida';
-
-                    const opp = live.opp_profile || {{}};
-                    const elStyle = document.getElementById('live-opp-style');
-                    if (elStyle) elStyle.textContent = opp.estilo || 'NUEVO RIVAL';
-                    const elName = document.getElementById('live-opp-name');
-                    if (elName) elName.textContent = (opp.nickname || live.opp_nick || 'Rival') + (live.opp_id ? ' (#' + live.opp_id + ')' : '');
-                    const elHands = document.getElementById('live-opp-hands');
-                    if (elHands) elHands.textContent = opp.manos || 0;
-                    const elVpip = document.getElementById('live-opp-vpip');
-                    if (elVpip) elVpip.textContent = (opp.vpip_pct || 0) + '%';
-                    const elPfr = document.getElementById('live-opp-pfr');
-                    if (elPfr) elPfr.textContent = (opp.pfr_pct || 0) + '%';
-                    const elAf = document.getElementById('live-opp-af');
-                    if (elAf) elAf.textContent = opp.agresividad || '1.0';
-                    const elTactic = document.getElementById('live-opp-tactic');
-                    if (elTactic) elTactic.textContent = 'Directriz Táctica: ' + (opp.recomendacion_tactica || 'Juego equilibrado GTO estándar.');
-
-                    const eventsFeed = document.getElementById('live-events-feed');
-                    if (eventsFeed && live.live_events) {{
-                        eventsFeed.innerHTML = live.live_events.map(ev => `<div>${{ev}}</div>`).join('');
-                        eventsFeed.scrollTop = eventsFeed.scrollHeight;
-                    }}
-                }}
+                RAW_DATA.live_status = freshData.live_status || {{}};
+                RAW_DATA.historical_profiles = freshData.historical_profiles || [];
+                renderLiveSection(RAW_DATA.live_status, RAW_DATA.historical_profiles);
 
                 const newHands = (freshData.all_hands || []).length;
                 const newDecs = (freshData.all_decisions || []).length;
@@ -2240,6 +2329,53 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
 """
 
 
+def _obtener_datos_live_para_dashboard(db_path: Path) -> Dict[str, Any]:
+    """Obtiene el snapshot multijugador en vivo (memoria de bot o archivo) y perfiles históricos."""
+    import sys
+    import config
+    from live_table_tracker import cargar_snapshot_live_archivo
+    from opponents_profiler import OpponentProfiler
+
+    live_status: Dict[str, Any] = {}
+    bot_mod = sys.modules.get("bot")
+    if bot_mod is not None and hasattr(bot_mod, "obtener_live_status"):
+        try:
+            live_status = bot_mod.obtener_live_status() or {}
+        except Exception:
+            live_status = {}
+    if not live_status:
+        live_status = cargar_snapshot_live_archivo()
+    if not live_status:
+        max_seats = getattr(config, "MAX_TABLE_SEATS", 3)
+        live_status = {
+            "hand_number": 1,
+            "current_street": "PREFLOP",
+            "my_cards": [],
+            "community_cards": [],
+            "last_pot": 0,
+            "position_name": "Desconocida",
+            "modalidad": getattr(config, "POKER_MODE", "Twister 3-Max"),
+            "table_info": {
+                "max_asientos": max_seats,
+                "asientos_ocupados": 0,
+                "asientos_disponibles": max_seats,
+                "jugadores_activos": 0,
+                "jugadores_en_mano": 0,
+                "numero_oponentes_mesa": 0,
+                "numero_oponentes_activos": 0,
+                "numero_oponentes_en_mano": 0,
+            },
+            "opponents": [],
+            "live_events": [],
+        }
+
+    try:
+        historical = OpponentProfiler(db_path=db_path).listar_perfiles_historicos(limit=100)
+    except Exception:
+        historical = []
+    return {"live_status": live_status, "historical_profiles": historical}
+
+
 def generar_dashboard_html(
     db_path: Path = DB_PATH,
     output_html: Path = DEFAULT_DASHBOARD_PATH,
@@ -2260,6 +2396,9 @@ def generar_dashboard_html(
     analytics = engine.calcular_analiticas_completas()
     analytics["all_hands"] = storage.consultar_manos()
     analytics["all_decisions"] = storage.consultar_decisiones()
+    live_bundle = _obtener_datos_live_para_dashboard(db_path)
+    analytics["live_status"] = live_bundle["live_status"]
+    analytics["historical_profiles"] = live_bundle["historical_profiles"]
 
     output_html = Path(output_html)
     output_html.parent.mkdir(parents=True, exist_ok=True)
@@ -2364,6 +2503,9 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
                 data = engine.calcular_analiticas_completas(filters if filters else None)
                 data["all_hands"] = storage.consultar_manos(filters if filters else None)
                 data["all_decisions"] = storage.consultar_decisiones(filters if filters else None)
+                live_bundle = _obtener_datos_live_para_dashboard(db_path)
+                data["live_status"] = live_bundle["live_status"]
+                data["historical_profiles"] = live_bundle["historical_profiles"]
                 body = json.dumps(data, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")

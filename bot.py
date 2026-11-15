@@ -10,6 +10,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 import config
 from poker_agent import PokerAgent, PokerDecision
 from opponents_profiler import OpponentProfiler
+from live_table_tracker import LiveTableMonitor
 from poker_experience_memory import PokerExperienceMemory
 from poker_gto_engine import clasificar_mano_preflop, calcular_pot_odds_y_sizing, analizar_textura_mesa_y_blockers, generar_frecuencia_mixta_gto, evaluar_combinacion_mano_y_mesa
 from analytics_logger import PokerAnalyticsLogger
@@ -45,6 +46,7 @@ class GameTracker:
         self.position_name = "DESCONOCIDA"
         self.current_street = "PREFLOP"
         self.current_round_no = 1
+        live_monitor.iniciar_nueva_mano()
         self.hero_just_acted_ts = 0.0
 
     def registrar_evento(self, tipo: str, detalle: str):
@@ -82,6 +84,7 @@ class GameTracker:
         self.position_name = "DESCONOCIDA"
         self.current_street = "PREFLOP"
         self.current_round_no = 1
+        live_monitor.iniciar_nueva_mano()
 
     def reset_mano(self):
         self.finalizar_mano_actual("Reinicio de mano / Modal")
@@ -93,6 +96,25 @@ class GameTracker:
 
 tracker = GameTracker()
 profiler = OpponentProfiler()
+live_monitor = LiveTableMonitor(
+    profiler=profiler,
+    modalidad=getattr(config, "POKER_MODE", "Twister 3-Max"),
+    max_asientos=getattr(config, "MAX_TABLE_SEATS", 3),
+    hero_nickname=getattr(config, "HERO_NICKNAME", ""),
+    big_blind=getattr(config, "BIG_BLIND_DEFAULT", 20.0),
+)
+
+
+def obtener_live_status() -> dict:
+    return live_monitor.obtener_snapshot_live(
+        hand_number=tracker.hand_number,
+        current_street=tracker.current_street,
+        my_cards=tracker.my_cards,
+        community_cards=tracker.community_cards,
+        last_pot=tracker.last_pot,
+        position_name=tracker.position_name,
+        live_events=tracker.current_hand_history,
+    )
 
 # JS MutationObserver para reacción instantánea (0ms)
 JS_INICIALIZAR_MUTATION_OBSERVER = r"""() => {
@@ -197,6 +219,41 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
         const stackRival = Array.from(document.querySelectorAll('.player-area:not(.my-player) .player-chips, .player-area:not(.my-player) .chips-amount, .player-area:not(.my-player) .stack-amount, .player-area:not(.my-player) .player-balance'))
             .map(el => el.innerText.trim()).filter(Boolean).join(' | ') || '0';
 
+        // Extracción multijugador por cada asiento (.player-area)
+        const jugadoresMesa = Array.from(document.querySelectorAll('.player-area')).map((area, idx) => {
+            const isHero = area.classList.contains('my-player');
+            const nickEl = area.querySelector('.player-name, .nickname, .username, .name, [class*="name"]');
+            const nickname = (nickEl?.innerText || '').replace(/\s+/g, ' ').trim();
+            const pid = area.getAttribute('data-player-id') || area.getAttribute('data-player-code') || area.id || '';
+            const stackTxt = (area.querySelector('.player-chips, .chips-amount, .stack-amount, .player-balance')?.innerText || '0').trim();
+            const betTxt = (area.querySelector('.player-bet .amount, .bet-amount')?.innerText || '0').trim();
+            const areaTxt = (area.innerText || '').trim();
+            const cls = (area.className || '').toLowerCase();
+            const isTurn = !!area.querySelector('.text-countdown, .timeout-wrapper, .countdown-text') || cls.includes('active-turn');
+            let status = 'ACTIVE';
+            if (!nickname && (/^(Vacío|Empty)$/i.test(areaTxt) || areaTxt.includes('Vacío') || areaTxt.includes('Empty') || cls.includes('empty'))) {
+                status = 'EMPTY';
+            } else if (cls.includes('sit-out') || cls.includes('sitout') || /Sit\s*Out|Ausente/i.test(areaTxt)) {
+                status = 'SIT_OUT';
+            } else if (cls.includes('disconnected') || /Desconectado|Disconnected|Offline/i.test(areaTxt)) {
+                status = 'DISCONNECTED';
+            } else if (cls.includes('fold') || /\bFold\b/i.test(areaTxt)) {
+                status = 'FOLDED';
+            } else if (cls.includes('eliminated') || cls.includes('busted')) {
+                status = 'ELIMINATED';
+            }
+            return {
+                seat: idx + 1,
+                is_hero: isHero,
+                player_id: pid,
+                nickname: nickname,
+                stack: stackTxt,
+                bet: betTxt,
+                status: status,
+                is_turn: isTurn
+            };
+        });
+
         const btnCallEl = accionesArea ? accionesArea.querySelector('#CALL, .action-call') : null;
         const callVal = (btnCallEl?.querySelector('.action-value')?.innerText || '').trim();
         const aIgualar = callVal || apuestasRivales || '0';
@@ -246,7 +303,8 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             modales_visibles: modales.join(' | '),
             es_mi_turno: esMiTurno,
             tiempo_restante: timerTexto,
-            apuestas_rivales: apuestasRivales
+            apuestas_rivales: apuestasRivales,
+            jugadores_mesa: jugadoresMesa
         };
     } catch(e) {
         return null;
@@ -1034,10 +1092,13 @@ def main():
                                         json_str = payload_str[start_idx:end_idx+1].replace('\\"', '"')
                                         data_json = json.loads(json_str)
 
-                                        if "nickname" in data_json:
-                                            tracker.opp_nick = data_json["nickname"]
-                                        if "playerCode" in data_json:
-                                            tracker.opp_id = str(data_json["playerCode"])
+                                        if "nickname" in data_json or "playerCode" in data_json:
+                                            ws_nick = str(data_json.get("nickname") or "").strip()
+                                            ws_pid = str(data_json.get("playerCode") or "").strip()
+                                            live_monitor.actualizar_jugador(player_id=ws_pid, nickname=ws_nick)
+                                            p_id, p_nick = live_monitor.obtener_rival_principal()
+                                            tracker.opp_id = p_id or ws_pid
+                                            tracker.opp_nick = p_nick or ws_nick
 
                                         if "roundNo" in data_json:
                                             ronda = int(data_json["roundNo"] or 1)
@@ -1068,6 +1129,11 @@ def main():
                                                 print(f"🃏 [iPoker WS DECODER] ➔ Mesa Comunitaria: {tracker.community_cards}")
 
                                         if "playerStates" in data_json:
+                                            live_monitor.actualizar_desde_ws_player_states(data_json["playerStates"])
+                                            p_id, p_nick = live_monitor.obtener_rival_principal()
+                                            if p_id or p_nick:
+                                                tracker.opp_id = p_id
+                                                tracker.opp_nick = p_nick
                                             for ps in data_json["playerStates"]:
                                                 if "isDealer" in ps and ps["isDealer"]:
                                                     if "cards" in ps and any(c != 'X' for c in ps.get('cards', [])):
@@ -1205,8 +1271,21 @@ def main():
                         if tracker.http_turn_signal:
                             tracker.http_turn_signal = False
 
+                    live_monitor.actualizar_desde_dom(dom_data)
+                    p_id_main, p_nick_main = live_monitor.obtener_rival_principal()
+                    if p_id_main or p_nick_main:
+                        tracker.opp_id = p_id_main
+                        tracker.opp_nick = p_nick_main
+
                     dom_data["historial_mano"] = tracker.obtener_contexto_completo()
                     dom_data["perfil_rival"] = profiler.obtener_perfil_explotativo(tracker.opp_id, tracker.opp_nick)
+                    dom_data["perfiles_oponentes"] = live_monitor.obtener_perfiles_oponentes(
+                        calle=tracker.current_street,
+                        bote=float(tracker.last_pot or 0.0),
+                        posicion_hero=tracker.position_name,
+                        historial_mano=" | ".join(tracker.current_hand_history[-4:]),
+                    )
+                    obtener_live_status()
 
                     mis_cartas = dom_data.get('mis_cartas', '') or " ".join(tracker.my_cards)
                     comunitarias = dom_data.get('cartas_comunitarias', '') or " ".join(tracker.community_cards)

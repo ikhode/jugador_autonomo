@@ -21,6 +21,11 @@ SLOW_MO = int(os.getenv("SLOW_MO", "100"))
 
 USER_DATA_DIR = Path("browser_profile")
 
+# Configuración de Modalidad y Mesa para Live HUD Multijugador
+POKER_MODE = os.getenv("POKER_MODE", "Twister 3-Max")
+MAX_TABLE_SEATS = int(os.getenv("MAX_TABLE_SEATS", "3"))
+HERO_NICKNAME = os.getenv("HERO_NICKNAME", GAME_USER)
+
 # Configuración del Sistema de Analíticas y Versionado Experimental
 BOT_VERSION = os.getenv("BOT_VERSION", "1.3")
 BOT_VERSION_DESC = os.getenv(
