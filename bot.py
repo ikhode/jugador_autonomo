@@ -25,6 +25,15 @@ from strategic_engine import StrategicEngine
 from opponent_model import OpponentModel
 from game_state_manager import GameStateManager
 from decision_maker import DecisionMaker
+from live_table_tracker import LiveTableMonitor, cargar_snapshot_live_archivo
+
+table_tracker = None
+
+def obtener_live_status() -> dict:
+    if "table_tracker" in globals() and table_tracker is not None:
+        p_obj = globals().get("profiler")
+        return table_tracker.obtener_snapshot_live(opponents_profiler=p_obj)
+    return cargar_snapshot_live_archivo()
 
 # Pool de subprocesos persistente global para cero bloqueos de E/S o red
 bg_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -289,6 +298,7 @@ class GameTracker:
 
 tracker = GameTracker()
 profiler = OpponentProfiler()
+table_tracker = LiveTableMonitor(profiler=profiler, hero_nickname=getattr(config, "HERO_NICKNAME", "Hero"))
 experience_memory = PokerExperienceMemory()
 
 
@@ -2354,6 +2364,8 @@ def main():
                                                 print(f"🃏 [iPoker WS DECODER] ➔ Mesa Comunitaria: {tracker.community_cards}")
 
                                         if "playerStates" in data_json:
+                                            if 'table_tracker' in globals() and table_tracker is not None:
+                                                table_tracker.actualizar_desde_ws_player_states(data_json["playerStates"])
                                             procesar_delta_player_states(
                                                 data_json,
                                                 tracker,
@@ -2510,6 +2522,8 @@ def main():
                             continue
 
                         dom_data = target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or {}
+                        if dom_data and 'table_tracker' in globals() and table_tracker is not None:
+                            table_tracker.actualizar_desde_dom(dom_data)
 
                         # Si llegó la señal de audio my_turn.mp3 pero los botones del DOM aún están renderizándose, esperar hasta 450ms
                         if tracker.http_turn_signal and not dom_data.get('botones_visibles'):
