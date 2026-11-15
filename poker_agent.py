@@ -146,19 +146,23 @@ class PokerAgent:
             if gto_pre or gto_math:
                 gto_section_str = f"""
             📐 ANÁLISIS MATEMÁTICO Y MATRIZ DE RANGOS GTO:
-            - Rango Preflop: Tier [{gto_pre.get('tier', 'N/A')}] (Score: {gto_pre.get('score', 0)}/100) - Mano: {gto_pre.get('mano_code', '')}
+            - Rango Preflop ({gto_pre.get('posicion', 'BTN')} | {gto_pre.get('situacion', 'open')}): Tier [{gto_pre.get('tier', 'N/A')}] (Score: {gto_pre.get('score', 0)}/100) - Mano: {gto_pre.get('mano_code', '')}
+            - Stack Efectivo: {gto_math.get('stack_efectivo_bb', 0)} BB | Bote: {gto_math.get('bote_bb', 0)} BB | A igualar: {gto_math.get('a_igualar_bb', 0)} BB
             - Pot Odds: {gto_math.get('pot_odds_pct', 0)}% (Precio a pagar para igualar)
             - Sizings Sugeridos (Apuestas): Pequeño 33%: {gto_math.get('sizing_cbet_pequeno', 0)} | Medio 66%: {gto_math.get('sizing_cbet_estandar', 0)} | Pot: {gto_math.get('sizing_cbet_fuerte', 0)}
             """
 
             gto_comb = dom_data.get('gto_combinacion', {})
             if gto_comb:
+                proyectos_txt = ", ".join(gto_comb.get('proyectos') or []) or "Ninguno"
                 comb_str = f"""
             🎴 DISTINCIÓN DE COMBINACIÓN (MANO PRIVADA VS MESA):
             - Clasificación Táctica: {gto_comb.get('categoria')}
             - Detalle: {gto_comb.get('descripcion')}
+            - ¿Juega solo la mesa (Board Plays)?: {"SI ⚠️ (Tus cartas no mejoran el tablero)" if gto_comb.get('mano_en_mesa') else "NO"}
             - ¿Es Pareja en Mano (Pocket Pair)?: {"SI ⚡ (Privada de alto valor)" if gto_comb.get('es_pareja_en_mano') else "NO"}
             - ¿Hay Pareja Compartida en Mesa?: {"SI (Todos los jugadores comparten la pareja de la mesa)" if gto_comb.get('pareja_en_mesa') else "NO"}
+            - Proyectos y Outs: {proyectos_txt} (Outs totales: {gto_comb.get('outs_totales', 0)})
             """
 
             gto_textura = dom_data.get('gto_textura', {})
@@ -167,7 +171,7 @@ class PokerAgent:
             🛡️ BLOCKERS (CARD REMOVAL) Y ANÁLISIS DE TEXTURA DE MESA:
             - Textura Tablero: {gto_textura.get('textura_mesa')}
             - Blockers en Mano / Mesa: Ases muertos = {gto_textura.get('blockers_ases')} | Reyes muertos = {gto_textura.get('blockers_reyes')}
-            - ALERTA DE FAROLES E INCONSISTENCIA: {gto_textura.get('alerta_farol_inconsistente', 'Línea de apuestas coherente')}
+            - ESTIMACIÓN DE RANGO POR TEXTURA: {gto_textura.get('estimacion_rango', 'Analizar rango rival según posición y acción')}
             """
 
             gto_frec = dom_data.get('gto_frecuencia', {})

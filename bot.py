@@ -11,7 +11,15 @@ import config
 from poker_agent import PokerAgent, PokerDecision
 from opponents_profiler import OpponentProfiler
 from poker_experience_memory import PokerExperienceMemory
-from poker_gto_engine import clasificar_mano_preflop, calcular_pot_odds_y_sizing, analizar_textura_mesa_y_blockers, generar_frecuencia_mixta_gto, evaluar_combinacion_mano_y_mesa
+from poker_gto_engine import (
+    clasificar_mano_preflop,
+    calcular_pot_odds_y_sizing,
+    analizar_textura_mesa_y_blockers,
+    generar_frecuencia_mixta_gto,
+    evaluar_combinacion_mano_y_mesa,
+    evaluar_push_fold_nash,
+    decidir_por_ev,
+)
 from analytics_logger import PokerAnalyticsLogger
 
 # Pool de subprocesos persistente global para cero bloqueos de E/S o red
@@ -198,6 +206,9 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
         }).filter(Boolean);
 
         const bote = (document.querySelector('#main-pot, .total-pot-amount')?.innerText || '').trim();
+        const blindsText = (document.querySelector('.blinds-info, .table-blinds, .level-blinds, .blinds')?.innerText || '').trim();
+        const blindsMatch = blindsText.match(/(\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)/);
+        const bigBlindDom = blindsMatch ? blindsMatch[2].replace(',', '') : '';
         const fuerzaMano = (document.querySelector('.hand-strength-text')?.innerText || '').trim();
         const montoInput = document.querySelector('.betting-input, .raise-input')?.value || '0';
 
@@ -286,7 +297,8 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             es_mi_turno: esMiTurno,
             tiempo_restante: timerTexto,
             apuestas_rivales: apuestasRivales,
-            jugadores_mesa: jugadoresMesa
+            jugadores_mesa: jugadoresMesa,
+            big_blind: bigBlindDom
         };
     } catch(e) {
         return null;
@@ -595,8 +607,30 @@ def actualizar_dom_data_conservando_contexto(
             if perfiles_multi:
                 dom_data["perfiles_oponentes"] = perfiles_multi
 
-    dom_data["gto_preflop"] = clasificar_mano_preflop(mis_cartas)
-    dom_data["gto_math"] = calcular_pot_odds_y_sizing(bote, dom_data.get("a_igualar"), dom_data.get("mi_stack"))
+    gto_math = calcular_pot_odds_y_sizing(
+        bote,
+        dom_data.get("a_igualar"),
+        dom_data.get("mi_stack"),
+        big_blind=_parse_num_dom(dom_data.get("big_blind"), float(getattr(config, "BIG_BLIND_DEFAULT", 20.0))) or None,
+        stack_rival_str=dom_data.get("stack_rival"),
+    )
+    posicion = getattr(tracker_obj, "position_name", "BTN") if tracker_obj is not None else (dom_data.get("posicion") or "BTN")
+    if posicion == "DESCONOCIDA":
+        posicion = "BTN"
+    a_igualar_bb = float(gto_math.get("a_igualar_bb") or 0.0)
+    situacion = dom_data.get("situacion") or (
+        "vs_allin"
+        if a_igualar_bb >= max(8.0, float(gto_math.get("stack_efectivo_bb") or 20.0) * 0.7)
+        else ("vs_raise" if a_igualar_bb > 1.5 else "open")
+    )
+
+    dom_data["gto_math"] = gto_math
+    dom_data["gto_preflop"] = clasificar_mano_preflop(
+        mis_cartas,
+        posicion=posicion,
+        stack_efectivo_bb=float(gto_math.get("stack_efectivo_bb") or 25.0),
+        situacion=situacion,
+    )
     dom_data["gto_textura"] = analizar_textura_mesa_y_blockers(mis_cartas, comunitarias)
     dom_data["gto_frecuencia"] = generar_frecuencia_mixta_gto()
     dom_data["gto_combinacion"] = evaluar_combinacion_mano_y_mesa(mis_cartas, comunitarias)
@@ -1214,52 +1248,148 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
     fuerza_lower = fuerza.lower()
     botones = str(dom_data.get('botones_visibles', '') or dom_data.get('opciones_disponibles', '')).upper()
     cartas = (dom_data.get('mis_cartas', '') or '').upper()
+    comunitarias_str = (dom_data.get('cartas_comunitarias') or '').strip()
+    es_preflop = not bool(comunitarias_str)
 
-    gto_pre = dom_data.get('gto_preflop') or clasificar_mano_preflop(cartas)
-    gto_comb = dom_data.get('gto_combinacion') or evaluar_combinacion_mano_y_mesa(cartas, dom_data.get('cartas_comunitarias', ''))
-    gto_math = dom_data.get('gto_math') or {}
+    bb = _parse_num_dom(dom_data.get('big_blind'), float(getattr(config, 'BIG_BLIND_DEFAULT', 20.0))) or float(getattr(config, 'BIG_BLIND_DEFAULT', 20.0))
+    gto_math = dom_data.get('gto_math') or calcular_pot_odds_y_sizing(
+        dom_data.get('bote', 0),
+        dom_data.get('a_igualar', 0),
+        dom_data.get('mi_stack', 0),
+        big_blind=bb,
+        stack_rival_str=dom_data.get('stack_rival'),
+    )
+    stack_efectivo_bb = float(gto_math.get('stack_efectivo_bb') or gto_math.get('mi_stack_bb') or 25.0)
+    a_igualar_bb = float(gto_math.get('a_igualar_bb') or 0.0)
+    posicion = str(dom_data.get('posicion') or 'BTN').upper()
+    if posicion == 'DESCONOCIDA':
+        posicion = 'BTN'
+    situacion = str(dom_data.get('situacion') or ('vs_raise' if a_igualar_bb > 1.5 else 'open'))
+
+    gto_pre = dom_data.get('gto_preflop') or clasificar_mano_preflop(
+        cartas,
+        posicion=posicion,
+        stack_efectivo_bb=stack_efectivo_bb,
+        situacion=situacion,
+    )
+    gto_comb = dom_data.get('gto_combinacion') or evaluar_combinacion_mano_y_mesa(cartas, comunitarias_str)
+    gto_textura = dom_data.get('gto_textura') or analizar_textura_mesa_y_blockers(cartas, comunitarias_str)
 
     raw_monto = dom_data.get('monto_apuesta_input', '0') or '0'
-    monto_saneado = int(re.sub(r"[^\d]", "", str(raw_monto)) or 0) or gto_math.get('sizing_cbet_estandar', 40)
+    monto_saneado = int(re.sub(r"[^\d]", "", str(raw_monto)) or 0) or int(gto_math.get('sizing_cbet_estandar') or round(bb * 2.0))
 
     hay_check = 'CHECK' in botones
     hay_call = 'CALL' in botones
     hay_bet = 'BET' in botones or 'RAISE' in botones
+    hay_allin = 'ALL_IN' in botones or 'ALLIN' in botones
+
+    # 0. Régimen Nash Push/Fold real <= PUSH_FOLD_MAX_BB (10 BB) en Preflop
+    if es_preflop and stack_efectivo_bb > 0 and stack_efectivo_bb <= float(getattr(config, 'PUSH_FOLD_MAX_BB', 10.0)):
+        num_activos = len([p for p in (dom_data.get('perfiles_oponentes') or []) if str(p.get('estado', 'ACTIVO')).upper() == 'ACTIVO']) + 1
+        nash = evaluar_push_fold_nash(
+            mano_code=gto_pre.get('mano_code', ''),
+            posicion=posicion,
+            stack_efectivo_bb=stack_efectivo_bb,
+            situacion=situacion,
+            num_activos=max(2, num_activos),
+        )
+        if nash.get('en_regimen_push_fold'):
+            acc_nash = nash['accion']
+            if acc_nash == 'ALL_IN':
+                if hay_allin:
+                    return PokerDecision(
+                        evaluacion=f"⚡ [Nash Push/Fold] {nash['razon']}",
+                        estrategia_competitiva=nash['rango_nash'],
+                        estado_pantalla="EN_MESA_JUEGO",
+                        es_mi_turno=True,
+                        accion="ALL_IN",
+                        monto_apuesta=0,
+                        confianza=0.95,
+                    )
+                if hay_bet:
+                    return PokerDecision(
+                        evaluacion=f"⚡ [Nash Push/Fold] {nash['razon']}",
+                        estrategia_competitiva=nash['rango_nash'],
+                        estado_pantalla="EN_MESA_JUEGO",
+                        es_mi_turno=True,
+                        accion="RAISE",
+                        monto_apuesta=int(gto_math.get('mi_stack') or round(stack_efectivo_bb * bb)),
+                        confianza=0.95,
+                    )
+            if acc_nash == 'CALL' and hay_call:
+                return PokerDecision(
+                    evaluacion=f"⚡ [Nash Push/Fold] {nash['razon']}",
+                    estrategia_competitiva=nash['rango_nash'],
+                    estado_pantalla="EN_MESA_JUEGO",
+                    es_mi_turno=True,
+                    accion="CALL",
+                    monto_apuesta=0,
+                    confianza=0.93,
+                )
+            if acc_nash == 'FOLD':
+                if hay_check:
+                    return PokerDecision(
+                        evaluacion=f"⚡ [Nash Push/Fold] Check gratis en lugar de Fold ({nash['razon']})",
+                        estrategia_competitiva="Carta gratis",
+                        estado_pantalla="EN_MESA_JUEGO",
+                        es_mi_turno=True,
+                        accion="CHECK",
+                        monto_apuesta=0,
+                        confianza=0.92,
+                    )
+                return PokerDecision(
+                    evaluacion=f"⚡ [Nash Push/Fold] {nash['razon']}",
+                    estrategia_competitiva=nash['rango_nash'],
+                    estado_pantalla="EN_MESA_JUEGO",
+                    es_mi_turno=True,
+                    accion="FOLD",
+                    monto_apuesta=0,
+                    confianza=0.92,
+                )
 
     tier = gto_pre.get('tier', 'DESCONOCIDO')
     es_pareja_mano = bool(gto_comb.get('es_pareja_en_mano'))
     coincidencias = bool(gto_comb.get('coincidencias_mesa'))
     es_color = bool(gto_comb.get('es_color'))
     es_escalera = bool(gto_comb.get('es_escalera'))
-    pareja_solo_en_mesa = bool(gto_comb.get('pareja_en_mesa')) and not es_pareja_mano and not coincidencias and not es_color and not es_escalera
-    es_preflop = not bool((dom_data.get('cartas_comunitarias') or '').strip())
-
+    mano_en_mesa = bool(gto_comb.get('mano_en_mesa'))
     subtipo_comb = str(gto_comb.get('categoria', ''))
-    es_top_pair = "Top Pair" in subtipo_comb or "Overpair" in subtipo_comb
+    es_top_o_overpair = bool(gto_comb.get('es_top_pair') or gto_comb.get('es_overpair') or "Top Pair" in subtipo_comb or "Overpair" in subtipo_comb)
+    es_set_o_mejor = bool(
+        gto_comb.get('es_monstruo')
+        or gto_comb.get('es_doble_pareja')
+        or gto_comb.get('es_set')
+        or gto_comb.get('es_trips')
+        or int(gto_comb.get('rango_categoria') or 0) >= 2
+    ) and not mano_en_mesa
 
     patrones_monstruo = ['doble pareja', 'trío', 'trio', 'escalera', 'color', 'full', 'póker', 'poker', 'escalera real']
-
     es_mano_fuerte = (
-        any(p in fuerza_lower for p in patrones_monstruo)
-        or (es_pareja_mano and (es_preflop or es_top_pair))
-        or (coincidencias and es_top_pair)
+        (any(p in fuerza_lower for p in patrones_monstruo) and not mano_en_mesa)
+        or es_set_o_mejor
+        or es_top_o_overpair
         or es_color
         or es_escalera
         or (es_preflop and tier in ('S', 'A'))
     )
 
+    tiene_proyecto = bool(gto_comb.get('proyecto_color') or gto_comb.get('proyecto_oesd') or gto_comb.get('es_combo_draw') or ('proyecto' in fuerza_lower))
+    outs_totales = int(gto_comb.get('outs_totales') or 0)
+    pot_odds_pct = float(gto_math.get('pot_odds_pct') or 0.0)
+    textura_peligrosa = bool(gto_textura.get('posible_color') or gto_textura.get('posible_escalera'))
+
     es_mano_jugable = (
         (es_preflop and tier in ('S', 'A', 'B'))
-        or ('proyecto' in fuerza_lower)
-        or es_pareja_mano
-        or coincidencias
+        or tiene_proyecto
+        or (es_pareja_mano and not mano_en_mesa)
+        or (coincidencias and not mano_en_mesa)
         or es_color
         or es_escalera
     )
 
     desc_mano = (gto_comb.get('categoria') if not es_preflop and gto_comb.get('categoria') != 'CARTA ALTA PRIVADA' else None) or fuerza or gto_pre.get('mano_code') or cartas
 
-    # 1. Manos fuertes por valor
+    # 1. Manos fuertes por valor (Top Pair / Overpair / Set+ / Premium Preflop)
     if es_mano_fuerte:
         if hay_bet:
             return PokerDecision(
@@ -1292,7 +1422,31 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
                 confianza=0.92
             )
 
-    # 2. Pase gratis (Check prioritario)
+    # 2. Combo draws / proyectos fuertes semi-farol o call por pot odds
+    if not es_preflop and tiene_proyecto and outs_totales >= 8:
+        equidad_aprox_pct = min(65.0, outs_totales * (4.0 if len(comunitarias_str.split()) == 3 else 2.0))
+        if gto_comb.get('es_combo_draw') and hay_bet and not textura_peligrosa:
+            return PokerDecision(
+                evaluacion=f"⚡ [0ms GTO] Combo Draw ({outs_totales} outs). Semi-farol agresivo.",
+                estrategia_competitiva="Presión con alta equidad de proyecto",
+                estado_pantalla="EN_MESA_JUEGO",
+                es_mi_turno=True,
+                accion="RAISE",
+                monto_apuesta=int(gto_math.get('sizing_cbet_estandar') or monto_saneado),
+                confianza=0.86,
+            )
+        if hay_call and equidad_aprox_pct >= pot_odds_pct:
+            return PokerDecision(
+                evaluacion=f"⚡ [0ms GTO] Proyecto rentable ({outs_totales} outs ~{equidad_aprox_pct:.0f}% eq vs {pot_odds_pct:.1f}% pot odds).",
+                estrategia_competitiva="Call por odds implícitas y directas",
+                estado_pantalla="EN_MESA_JUEGO",
+                es_mi_turno=True,
+                accion="CALL",
+                monto_apuesta=0,
+                confianza=0.85,
+            )
+
+    # 3. Pase gratis (Check prioritario)
     if hay_check:
         return PokerDecision(
             evaluacion=f"⚡ [0ms GTO] Pase gratis disponible con mano {desc_mano}.",
@@ -1304,7 +1458,7 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
             confianza=0.90
         )
 
-    # 3. Defensa activa en Preflop y Postflop para manos jugables (evita Overfold)
+    # 4. Defensa activa con Middle/Bottom Pair o rango jugable evaluando Pot Odds y Textura
     if hay_call:
         if es_preflop and tier in ('S', 'A', 'B'):
             return PokerDecision(
@@ -1316,16 +1470,30 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
                 monto_apuesta=0,
                 confianza=0.88
             )
-        elif es_mano_jugable and (gto_math.get('pot_odds_pct', 0) <= 46 or "Top Pair" in subtipo_comb or "Middle" in subtipo_comb):
+        max_pot_odds_call = 28.0 if textura_peligrosa else 38.0
+        if es_mano_jugable and not mano_en_mesa and pot_odds_pct <= max_pot_odds_call:
             return PokerDecision(
-                evaluacion=f"⚡ [0ms GTO] Mano jugable [{tier}] ({desc_mano}). Pagando call con Pot Odds razonables.",
-                estrategia_competitiva="Defensa de rango en precio correcto",
+                evaluacion=f"⚡ [0ms GTO] Mano jugable ({desc_mano}). Call por Pot Odds ({pot_odds_pct:.1f}%).",
+                estrategia_competitiva="Control de bote y defensa por precio",
                 estado_pantalla="EN_MESA_JUEGO",
                 es_mi_turno=True,
                 accion="CALL",
                 monto_apuesta=0,
-                confianza=0.85
+                confianza=0.84
             )
+        # Último filtro por EV cuando hay duda en postflop
+        if not es_preflop and (es_mano_jugable or gto_comb.get('proyecto_gutshot')):
+            ev_res = decidir_por_ev(dom_data)
+            if ev_res['accion'] in ('CALL', 'RAISE', 'ALL_IN'):
+                return PokerDecision(
+                    evaluacion=f"⚡ [0ms EV] {ev_res['razon']}",
+                    estrategia_competitiva="Decisión óptima por Valor Esperado",
+                    estado_pantalla="EN_MESA_JUEGO",
+                    es_mi_turno=True,
+                    accion=ev_res['accion'],
+                    monto_apuesta=ev_res['monto'],
+                    confianza=0.82,
+                )
 
     # 4. Fold defensivo solo para manos débiles fuera de rango
     if hay_call:
@@ -1661,20 +1829,26 @@ def main():
                             screenshot_bytes = owner_page.screenshot(type="jpeg", quality=75)
 
                             print(f"\n--- [Turno Hero #{ciclo}] 🎴 Mis Cartas: {mis_cartas or 'N/A'} | Mesa: {comunitarias or '-'} | Bote: {bote} ---")
-                            print("🤖 Consultando a Gemini AI (1 consulta única, timeout máx 4.5s)...")
 
                             decision = None
                             decision_source = "gemini"
                             t0 = time.time()
-                            try:
-                                decision = consultar_gemini_con_timeout(agent, screenshot_bytes, dom_data=dom_data, timeout_seg=4.5)
-                            except Exception as e:
-                                print(f"⚠️ Excepción al consultar Gemini AI: {e}")
-
-                            if not decision or decision.accion in ("WAIT", "START_GAME", "REPLAY"):
-                                print("🛡️ [RESPALDO DE SEGURIDAD 0ms] Ejecutando acción defensiva rápida...")
+                            stack_ef_bb = float((dom_data.get("gto_math") or {}).get("stack_efectivo_bb") or 0.0)
+                            if not comunitarias and 0 < stack_ef_bb <= float(getattr(config, "PUSH_FOLD_MAX_BB", 10.0)):
+                                print(f"⚡ [Nash Push/Fold <= {config.PUSH_FOLD_MAX_BB:.0f}BB] Decisión directa sin LLM ({stack_ef_bb:.1f} BB)...")
                                 decision = decidir_accion_rapida(dom_data)
-                                decision_source = "gto_fallback_0ms"
+                                decision_source = "nash_push_fold"
+                            else:
+                                print("🤖 Consultando a Gemini AI (1 consulta única, timeout máx 4.5s)...")
+                                try:
+                                    decision = consultar_gemini_con_timeout(agent, screenshot_bytes, dom_data=dom_data, timeout_seg=4.5)
+                                except Exception as e:
+                                    print(f"⚠️ Excepción al consultar Gemini AI: {e}")
+
+                                if not decision or decision.accion in ("WAIT", "START_GAME", "REPLAY"):
+                                    print("🛡️ [RESPALDO DE SEGURIDAD 0ms] Ejecutando acción defensiva rápida...")
+                                    decision = decidir_accion_rapida(dom_data)
+                                    decision_source = "gto_fallback_0ms"
 
                             dt = time.time() - t0
                             print(f"⚡ [DECISIÓN IA ({dt:.2f}s)]: {decision.accion} | Confianza: {decision.confianza:.2f} | {decision.evaluacion}")

@@ -41,6 +41,13 @@ BIG_BLIND_DEFAULT = float(os.getenv("BIG_BLIND_DEFAULT", "20.0"))
 INITIAL_BANKROLL = float(os.getenv("INITIAL_BANKROLL", "1500.0"))
 ANALYTICS_ENABLED = os.getenv("ANALYTICS_ENABLED", "true").lower() == "true"
 
+# Parámetros del Motor GTO y Decisor por EV (Fase 2)
+PUSH_FOLD_MAX_BB = float(os.getenv("PUSH_FOLD_MAX_BB", "10.0"))
+MONTE_CARLO_ITERATIONS = int(os.getenv("MONTE_CARLO_ITERATIONS", "250"))
+SIZING_CBET_PCTS = (0.33, 0.66, 1.0)
+OPEN_RAISE_BB = float(os.getenv("OPEN_RAISE_BB", "2.2"))
+THREE_BET_MULTIPLIER = float(os.getenv("THREE_BET_MULTIPLIER", "3.0"))
+
 # Selectores CSS y de elementos en la mesa de póker
 SELECTORS = {
     "btn_acceder": "xpath=//*[@id=\"root\"]/nav/div/div[3]/button, #btn-login, button.btn-login, a.btn-login, .login-btn",
