@@ -1987,7 +1987,7 @@ def obtener_o_crear_contexto(p, user_data_dir):
     return context, False
 
 def main():
-    agent = PokerAgent()
+    agent = PokerAgent(fallback_fn=decidir_accion_rapida)
     if analytics_logger is not None:
         try:
             from analytics_dashboard import iniciar_servidor_dashboard_background
