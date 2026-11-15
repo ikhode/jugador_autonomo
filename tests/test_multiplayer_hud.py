@@ -183,19 +183,19 @@ class TestMultiplayerLiveHUD(unittest.TestCase):
         self.assertEqual(len(historicos), 1)
 
     def test_10_reinicio_bot_y_recuperacion_historica_y_muestra_minima(self):
-        # Con pocas manos (< 10), no clasifica definitivamente
+        # Con pocas manos (< 30), no clasifica definitivamente
         for _ in range(3):
             self.profiler.incrementar_manos_rival("P_LOW", "Novato")
             self.profiler.registrar_accion_rival("P_LOW", "Novato", "CALL", calle="PREFLOP")
         perfil_low = self.profiler.obtener_perfil_explotativo("P_LOW", "Novato")
-        self.assertEqual(perfil_low["estilo"], "Perfil desconocido")
+        self.assertEqual(perfil_low["estilo"], "SIN DATOS")
         self.assertEqual(perfil_low["confianza_nivel"], "MUESTRA INSUFICIENTE")
 
-        # Jugador con muestra suficiente (>= 10 manos) estilo Calling Station
-        for _ in range(12):
-            self.profiler.incrementar_manos_rival("P_CS", "StationPro")
-            self.profiler.registrar_accion_rival("P_CS", "StationPro", "CALL", calle="PREFLOP")
-            self.profiler.registrar_accion_rival("P_CS", "StationPro", "CHECK", calle="POSTFLOP")
+        # Jugador con muestra suficiente (>= 30 manos) estilo Calling Station
+        for h in range(1, MIN_SAMPLE_FOR_CLASSIFICATION + 1):
+            self.profiler.incrementar_manos_rival("P_CS", "StationPro", hand_id=h)
+            self.profiler.registrar_accion_rival("P_CS", "StationPro", "CALL", calle="PREFLOP", hand_id=h)
+            self.profiler.registrar_accion_rival("P_CS", "StationPro", "CALL", calle="POSTFLOP", hand_id=h)
 
         # Simular reinicio creando una nueva instancia de OpponentProfiler apuntando a la misma DB
         profiler_reiniciado = OpponentProfiler(db_path=self.db_path)

@@ -59,6 +59,12 @@ class GameTracker:
         self.last_opp_archetype = "Desconocido"
         self.last_action_taken = "WAIT"
         self.last_hand_net_chips = 0.0
+        self.prev_player_states: Dict[str, Dict[str, Any]] = {}
+        self.active_opponents: Dict[str, str] = {}
+        self.ws_action_ts: float = 0.0
+        self.preflop_raise_count: int = 0
+        self.preflop_raiser_id: Optional[str] = None
+        self.cbet_fired_in_hand: bool = False
 
     def registrar_evento(self, tipo: str, detalle: str):
         timestamp = time.strftime('%H:%M:%S')
@@ -117,6 +123,12 @@ class GameTracker:
         self.last_opp_archetype = "Desconocido"
         self.last_action_taken = "WAIT"
         self.last_hand_net_chips = 0.0
+        self.prev_player_states: Dict[str, Dict[str, Any]] = {}
+        self.active_opponents: Dict[str, str] = {}
+        self.ws_action_ts: float = 0.0
+        self.preflop_raise_count: int = 0
+        self.preflop_raiser_id: Optional[str] = None
+        self.cbet_fired_in_hand: bool = False
 
     def reset_mano(self):
         self.finalizar_mano_actual("Reinicio de mano / Modal")
@@ -129,6 +141,134 @@ class GameTracker:
 tracker = GameTracker()
 profiler = OpponentProfiler()
 experience_memory = PokerExperienceMemory()
+
+
+def procesar_delta_player_states(
+    data_json: dict,
+    tracker_obj: GameTracker,
+    profiler_obj: OpponentProfiler,
+    hero_nick: str = "",
+) -> List[Tuple[str, str, str]]:
+    """
+    Atribuye acciones en 3-Max usando el delta exacto de playerStates del WebSocket (con playerCode).
+    Devuelve una lista de (player_id, nickname, accion) atribuidas en este delta.
+    """
+    states = data_json.get("playerStates")
+    if not isinstance(states, list):
+        return []
+
+    atribuidas: List[Tuple[str, str, str]] = []
+    calle = getattr(tracker_obj, "current_street", "PREFLOP")
+    hand_id = getattr(tracker_obj, "hand_number", 1)
+    max_prev_bet = max(
+        (float(v.get("bet", 0.0)) for v in tracker_obj.prev_player_states.values()),
+        default=0.0,
+    )
+    hero_nick_l = (hero_nick or "").strip().lower()
+
+    for ps in states:
+        if not isinstance(ps, dict):
+            continue
+        pid = str(ps.get("playerCode") or ps.get("id") or ps.get("nickname") or "").strip()
+        nick = str(ps.get("nickname") or pid).strip()
+        if not pid and not nick:
+            continue
+
+        # Excluir a Hero
+        cards_ps = [c for c in (ps.get("cards") or []) if isinstance(c, str) and c != "X"]
+        es_hero = bool(
+            ps.get("isHero")
+            or (hero_nick_l and nick.lower() == hero_nick_l)
+            or (cards_ps and tracker_obj.my_cards and cards_ps == tracker_obj.my_cards)
+        )
+        bet = float(ps.get("bet") or ps.get("roundBet") or ps.get("currentBet") or 0.0)
+        status = str(ps.get("status") or ps.get("state") or "ACTIVE").upper()
+        action_ws = str(ps.get("action") or ps.get("lastAction") or "").upper()
+        seat = ps.get("seat")
+
+        if es_hero:
+            tracker_obj.prev_player_states[pid or nick] = {"bet": bet, "status": status, "nickname": nick}
+            if bet > max_prev_bet:
+                max_prev_bet = bet
+            continue
+
+        if status in ("FOLD", "FOLDED", "OUT", "ELIMINATED"):
+            tracker_obj.active_opponents.pop(pid, None)
+        else:
+            tracker_obj.active_opponents[pid] = nick
+
+        prev = tracker_obj.prev_player_states.get(pid, {})
+        prev_bet = float(prev.get("bet", 0.0))
+        prev_status = str(prev.get("status", "ACTIVE")).upper()
+
+        accion_detectada: Optional[str] = None
+        is_3bet = False
+        three_bet_opp = False
+        facing_3bet = False
+        is_cbet = False
+        cbet_opp = False
+        facing_cbet = False
+
+        if action_ws in ("FOLD", "FOLDED") or (status in ("FOLD", "FOLDED") and prev_status not in ("FOLD", "FOLDED")):
+            accion_detectada = "FOLD"
+            if calle == "PREFLOP":
+                three_bet_opp = tracker_obj.preflop_raise_count == 1
+                facing_3bet = tracker_obj.preflop_raise_count >= 2
+            else:
+                facing_cbet = tracker_obj.cbet_fired_in_hand
+        elif bet > prev_bet:
+            if bet > max_prev_bet:
+                accion_detectada = "RAISE" if (calle == "PREFLOP" or max_prev_bet > 0) else "BET"
+                if calle == "PREFLOP":
+                    if tracker_obj.preflop_raise_count >= 1:
+                        is_3bet = True
+                        three_bet_opp = True
+                    else:
+                        tracker_obj.preflop_raiser_id = pid
+                    tracker_obj.preflop_raise_count += 1
+                else:
+                    if tracker_obj.preflop_raiser_id == pid and not tracker_obj.cbet_fired_in_hand:
+                        is_cbet = True
+                        cbet_opp = True
+                        tracker_obj.cbet_fired_in_hand = True
+                max_prev_bet = bet
+            else:
+                accion_detectada = "CALL"
+                if calle == "PREFLOP":
+                    three_bet_opp = tracker_obj.preflop_raise_count == 1
+                    facing_3bet = tracker_obj.preflop_raise_count >= 2
+                else:
+                    facing_cbet = tracker_obj.cbet_fired_in_hand
+        elif action_ws == "CHECK":
+            accion_detectada = "CHECK"
+            if calle != "PREFLOP" and tracker_obj.preflop_raiser_id == pid and not tracker_obj.cbet_fired_in_hand:
+                cbet_opp = True
+
+        if accion_detectada:
+            profiler_obj.registrar_accion_rival(
+                player_id=pid,
+                nickname=nick,
+                accion=accion_detectada,
+                calle=calle,
+                is_3bet=is_3bet,
+                three_bet_opportunity=three_bet_opp,
+                facing_3bet=facing_3bet,
+                is_cbet=is_cbet,
+                cbet_opportunity=cbet_opp,
+                facing_cbet=facing_cbet,
+                seat=seat,
+                status=status,
+                hand_id=hand_id,
+            )
+            tracker_obj.opp_id = pid
+            tracker_obj.opp_nick = nick
+            tracker_obj.ws_action_ts = time.time()
+            tracker_obj.registrar_evento("WS_ACCION", f"{nick} ({pid}): {accion_detectada}")
+            atribuidas.append((pid, nick, accion_detectada))
+
+        tracker_obj.prev_player_states[pid] = {"bet": bet, "status": status, "nickname": nick}
+
+    return atribuidas
 
 # JS MutationObserver para reacción instantánea (0ms)
 JS_INICIALIZAR_MUTATION_OBSERVER = r"""() => {
@@ -1661,17 +1801,32 @@ def main():
                                 tracker.registrar_evento("SONIDO", "¡Mano Ganada!")
                                 tracker.finalizar_mano_actual("Mano Ganada (Bote cobrado)")
                             elif "chips_placed.mp3" in url or "action_bet.png" in url:
-                                tracker.registrar_evento("ACCION_MESA", "Apuesta/Fichas colocadas")
-                                if (tracker.opp_id or tracker.opp_nick) and (time.time() - tracker.hero_just_acted_ts > 1.5):
-                                    profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "BET", calle=tracker.current_street)
+                                tracker.registrar_evento("ACCION_MESA", "Apuesta/Fichas colocadas (señal de sonido/timing)")
+                                if (
+                                    len(tracker.active_opponents) == 1
+                                    and (tracker.opp_id or tracker.opp_nick)
+                                    and (time.time() - tracker.hero_just_acted_ts > 1.5)
+                                    and (time.time() - tracker.ws_action_ts > 1.2)
+                                ):
+                                    profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "BET", calle=tracker.current_street, hand_id=tracker.hand_number)
                             elif "player_fold.mp3" in url or "action_fold.png" in url:
-                                tracker.registrar_evento("ACCION_MESA", "Rival hizo Fold")
-                                if (tracker.opp_id or tracker.opp_nick) and (time.time() - tracker.hero_just_acted_ts > 1.5):
-                                    profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "FOLD", calle=tracker.current_street)
+                                tracker.registrar_evento("ACCION_MESA", "Fold detectado (señal de sonido/timing)")
+                                if (
+                                    len(tracker.active_opponents) == 1
+                                    and (tracker.opp_id or tracker.opp_nick)
+                                    and (time.time() - tracker.hero_just_acted_ts > 1.5)
+                                    and (time.time() - tracker.ws_action_ts > 1.2)
+                                ):
+                                    profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "FOLD", calle=tracker.current_street, hand_id=tracker.hand_number)
                             elif "player_check.mp3" in url or "action_check.png" in url:
-                                tracker.registrar_evento("ACCION_MESA", "Jugador hizo Check")
-                                if (tracker.opp_id or tracker.opp_nick) and (time.time() - tracker.hero_just_acted_ts > 1.5):
-                                    profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "CHECK", calle=tracker.current_street)
+                                tracker.registrar_evento("ACCION_MESA", "Check detectado (señal de sonido/timing)")
+                                if (
+                                    len(tracker.active_opponents) == 1
+                                    and (tracker.opp_id or tracker.opp_nick)
+                                    and (time.time() - tracker.hero_just_acted_ts > 1.5)
+                                    and (time.time() - tracker.ws_action_ts > 1.2)
+                                ):
+                                    profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "CHECK", calle=tracker.current_street, hand_id=tracker.hand_number)
                             elif "cards-classic-assets" in url and url.endswith(".svg"):
                                 card_name = url.split("/")[-1].replace(".svg", "").upper()
                                 tracker.registrar_evento("CARTA_SVG", f"Carta cargada en mesa: {card_name}")
@@ -1701,9 +1856,14 @@ def main():
                                             if ronda == 1:
                                                 tracker.community_cards.clear()
                                                 if tracker.current_street == "POSTFLOP" or len(tracker.current_hand_history) > 3:
+                                                    prev_hand_id = tracker.hand_number
+                                                    rivales_previos = list(tracker.active_opponents.items()) or ([(tracker.opp_id, tracker.opp_nick)] if (tracker.opp_id or tracker.opp_nick) else [])
                                                     tracker.finalizar_mano_actual("Fin de mano previa")
-                                                    if tracker.opp_id or tracker.opp_nick:
-                                                        profiler.incrementar_manos_rival(tracker.opp_id, tracker.opp_nick)
+                                                    for r_id, r_nick in rivales_previos:
+                                                        profiler.incrementar_manos_rival(r_id, r_nick, hand_id=prev_hand_id)
+                                            if ronda != tracker.current_round_no:
+                                                for st in tracker.prev_player_states.values():
+                                                    st["bet"] = 0.0
                                             tracker.current_round_no = ronda
                                             tracker.current_street = calle_nueva
                                             print(f"🔄 [iPoker WS DECODER] ➔ Ronda #{ronda} ({tracker.current_street})")
@@ -1723,6 +1883,12 @@ def main():
                                                 print(f"🃏 [iPoker WS DECODER] ➔ Mesa Comunitaria: {tracker.community_cards}")
 
                                         if "playerStates" in data_json:
+                                            procesar_delta_player_states(
+                                                data_json,
+                                                tracker,
+                                                profiler,
+                                                hero_nick=getattr(config, "HERO_NICKNAME", ""),
+                                            )
                                             for ps in data_json["playerStates"]:
                                                 if "isDealer" in ps and ps["isDealer"]:
                                                     if "cards" in ps and any(c != 'X' for c in ps.get('cards', [])):
