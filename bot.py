@@ -548,6 +548,82 @@ def validar_accion(accion: str, monto: Any, estado_dom: Optional[dict]) -> Tuple
     return accion_norm, int(round(max(0.0, monto_val))), None
 
 
+def resolver_decision_hibrida(
+    dom_data: Optional[dict],
+    motor_decision: PokerDecision,
+    ev_res: Optional[dict],
+    llm_decision: Optional[PokerDecision],
+    ev_threshold_bb: Optional[float] = None,
+) -> Tuple[PokerDecision, dict]:
+    """
+    En modo híbrido, el motor GTO propone primero; la decisión del LLM solo reemplaza
+    a la del motor si es legal y la diferencia de EV en BB es <= ev_threshold_bb.
+    Registra siempre ambas decisiones en dom_data['decision_hibrida'].
+    """
+    umbral = float(
+        ev_threshold_bb
+        if ev_threshold_bb is not None
+        else getattr(config, "HYBRID_EV_DIFF_THRESHOLD_BB", 0.5)
+    )
+    evs = (ev_res or {}).get("evs") or {}
+    motor_acc = (motor_decision.accion or "WAIT").upper()
+    ev_motor = float(evs.get(motor_acc, (ev_res or {}).get("ev_bb", 0.0) or 0.0))
+
+    registro: Dict[str, Any] = {
+        "propuesta_motor": {"accion": motor_acc, "monto": int(getattr(motor_decision, "monto_apuesta", 0) or 0), "ev_bb": ev_motor},
+        "propuesta_llm": None,
+        "ev_diff_bb": None,
+        "umbral_bb": umbral,
+        "aceptada_llm": False,
+        "razon": "",
+    }
+
+    if not llm_decision or (llm_decision.accion or "").upper() in ("WAIT", "START_GAME", "REPLAY"):
+        registro["razon"] = "LLM sin propuesta válida; se mantiene propuesta del motor."
+        if isinstance(dom_data, dict):
+            dom_data["decision_hibrida"] = registro
+        return motor_decision, registro
+
+    llm_raw_acc = (llm_decision.accion or "WAIT").upper()
+    llm_raw_monto = getattr(llm_decision, "monto_apuesta", 0) or 0
+    llm_legal_acc, llm_legal_monto, motivo_ilegal = validar_accion(llm_raw_acc, llm_raw_monto, dom_data)
+    es_legal = (motivo_ilegal is None) and (llm_legal_acc in evs if evs else True)
+    ev_llm = float(evs.get(llm_legal_acc, ev_motor)) if llm_legal_acc in evs else None
+    ev_diff = abs(ev_motor - ev_llm) if ev_llm is not None else None
+
+    registro["propuesta_llm"] = {
+        "accion_original": llm_raw_acc,
+        "accion_legal": llm_legal_acc,
+        "monto": llm_legal_monto,
+        "ev_bb": ev_llm,
+        "es_legal": es_legal,
+        "motivo_ilegal": motivo_ilegal,
+    }
+    registro["ev_diff_bb"] = round(ev_diff, 3) if ev_diff is not None else None
+
+    if es_legal and ev_diff is not None and ev_diff <= umbral:
+        registro["aceptada_llm"] = True
+        registro["razon"] = f"LLM aceptado (ΔEV={ev_diff:.2f}BB <= {umbral:.2f}BB)."
+        final_dec = PokerDecision(
+            evaluacion=f"[Híbrido LLM] {llm_decision.evaluacion}",
+            estrategia_competitiva=llm_decision.estrategia_competitiva,
+            estado_pantalla=llm_decision.estado_pantalla,
+            es_mi_turno=True,
+            accion=llm_legal_acc,
+            monto_apuesta=llm_legal_monto,
+            confianza=llm_decision.confianza,
+        )
+    else:
+        registro["razon"] = (
+            f"Motor mantenido (ilegal={not es_legal}, ΔEV={ev_diff if ev_diff is not None else 'N/A'}BB > {umbral:.2f}BB)."
+        )
+        final_dec = motor_decision
+
+    if isinstance(dom_data, dict):
+        dom_data["decision_hibrida"] = registro
+    return final_dec, registro
+
+
 def actualizar_dom_data_conservando_contexto(
     dom_data: dict,
     nuevo_dom: Optional[dict],
@@ -1820,13 +1896,20 @@ def main():
                             ultimo_mano_street_key = turno_street_key
                             ultimo_tiempo_actividad = time.time()
 
-                            owner_page = getattr(target_mesa, 'page', page)
-                            try:
-                                if len(context.pages) > 1 and not owner_page.is_closed():
-                                    owner_page.bring_to_front()
-                            except Exception:
-                                pass
-                            screenshot_bytes = owner_page.screenshot(type="jpeg", quality=75)
+                            # DOM es fuente primaria; captura solo como fallback si faltan cartas/botones o USAR_CAPTURA=true
+                            screenshot_bytes = None
+                            usar_captura = getattr(config, "USAR_CAPTURA", False) or (not mis_cartas) or (not botones)
+                            if usar_captura:
+                                owner_page = getattr(target_mesa, 'page', page)
+                                try:
+                                    if len(context.pages) > 1 and not owner_page.is_closed():
+                                        owner_page.bring_to_front()
+                                except Exception:
+                                    pass
+                                try:
+                                    screenshot_bytes = owner_page.screenshot(type="jpeg", quality=85)
+                                except Exception as e:
+                                    print(f"⚠️ Error tomando captura fallback: {e}")
 
                             print(f"\n--- [Turno Hero #{ciclo}] 🎴 Mis Cartas: {mis_cartas or 'N/A'} | Mesa: {comunitarias or '-'} | Bote: {bote} ---")
 
@@ -1834,10 +1917,28 @@ def main():
                             decision_source = "gemini"
                             t0 = time.time()
                             stack_ef_bb = float((dom_data.get("gto_math") or {}).get("stack_efectivo_bb") or 0.0)
+                            modo_activo = config.obtener_modo_activo() if hasattr(config, "obtener_modo_activo") else str(getattr(config, "MODO", "gemini")).lower()
+
                             if not comunitarias and 0 < stack_ef_bb <= float(getattr(config, "PUSH_FOLD_MAX_BB", 10.0)):
                                 print(f"⚡ [Nash Push/Fold <= {config.PUSH_FOLD_MAX_BB:.0f}BB] Decisión directa sin LLM ({stack_ef_bb:.1f} BB)...")
                                 decision = decidir_accion_rapida(dom_data)
                                 decision_source = "nash_push_fold"
+                            elif modo_activo == "determinista":
+                                print("🛡️ [MODO DETERMINISTA] Decidiendo con motor GTO sin invocar LLM...")
+                                decision = decidir_accion_rapida(dom_data)
+                                decision_source = "gto_determinista"
+                            elif modo_activo == "hibrido":
+                                print("⚖️ [MODO HÍBRIDO] Evaluando motor GTO + EV y consultando LLM...")
+                                motor_dec = decidir_accion_rapida(dom_data)
+                                ev_res = decidir_por_ev(dom_data)
+                                llm_dec = None
+                                try:
+                                    llm_dec = consultar_gemini_con_timeout(agent, screenshot_bytes, dom_data=dom_data, timeout_seg=4.5)
+                                except Exception as e:
+                                    print(f"⚠️ Excepción al consultar LLM en modo híbrido: {e}")
+                                decision, reg_hib = resolver_decision_hibrida(dom_data, motor_dec, ev_res, llm_dec)
+                                decision_source = "hibrido_llm" if reg_hib.get("aceptada_llm") else "hibrido_motor"
+                                print(f"⚖️ [HÍBRIDO] {reg_hib.get('razon')}")
                             else:
                                 print("🤖 Consultando a Gemini AI (1 consulta única, timeout máx 4.5s)...")
                                 try:

@@ -1,26 +1,37 @@
+import logging
+import os
+from pathlib import Path
+import platform
 import re
 import io
 import json
 import time
 from pydantic import BaseModel, Field
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 from google import genai
 from google.genai import types
 import config
 
+logger = logging.getLogger(__name__)
+
+
 def optimizar_imagen(image_bytes: bytes) -> tuple[bytes, str]:
     """
-    Comprime la captura de pantalla PNG (~2.5MB) a un JPEG ultraligero (~50KB) a 1024px.
-    Esto reduce el tiempo de subida de red y latencia de Gemini de 32s a ~0.5s.
+    Comprime la captura de pantalla a JPEG conservando legibilidad de números pequeños y cartas
+    (sin reducir por debajo de 1920x1080 y con subsampling=0). Registra cualquier error.
     """
     try:
         from PIL import Image
         img = Image.open(io.BytesIO(image_bytes))
-        img.thumbnail((1024, 768))
+        if img.width > 1920 or img.height > 1080:
+            resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1)
+            img.thumbnail((1920, 1080), resampling)
         buf = io.BytesIO()
-        img.convert("RGB").save(buf, format="JPEG", quality=70)
+        img.convert("RGB").save(buf, format="JPEG", quality=85, subsampling=0)
         return buf.getvalue(), "image/jpeg"
-    except Exception:
+    except Exception as e:
+        logger.warning("⚠️ [optimizar_imagen] Error procesando captura (%s): %s", type(e).__name__, e)
+        print(f"⚠️ [optimizar_imagen] Error procesando captura ({type(e).__name__}): {e}")
         return image_bytes, "image/png"
 
 class PokerDecision(BaseModel):
@@ -104,7 +115,7 @@ class PokerAgent:
         frecuencia_str = ""
         memoria_str = ""
 
-        active_model = getattr(config, "ACTIVE_MODEL", "gemini-3.1-flash-lite")
+        active_model = getattr(config, "ACTIVE_MODEL", config.GEMINI_MODEL)
         if active_model == "gemma-4b-local":
             print("💻 Consultando a Gemma 4B Local (GGUF)...")
             prompt_local = f"Mesa de póker: {dom_data}. Responde en JSON con la acción (FOLD, CHECK, CALL, RAISE, ALL_IN), evaluacion y confianza."
@@ -112,17 +123,6 @@ class PokerAgent:
             if dec_local:
                 return dec_local
             print("⚠️ Gemma 4B Local no retornó respuesta, derivando a Gemini / GTO...")
-        elif active_model == "gto-heuristic":
-            print("🛡️ Modo Heurístico GTO activo. Retornando respuesta rápida 0ms...")
-            return PokerDecision(
-                evaluacion="Decisión tomada exclusivamente por el Motor Heurístico GTO 0ms",
-                estrategia_competitiva="Lógica determinista GTO de respaldo",
-                estado_pantalla="EN_MESA_JUEGO",
-                es_mi_turno=True,
-                accion="WAIT",
-                monto_apuesta=0,
-                confianza=0.9
-            )
         historial_str = ""
         perfil_rival_str = ""
         gto_section_str = ""
@@ -220,8 +220,8 @@ class PokerAgent:
         1. APRENDIZAJE DE ERRORES PASADOS: NUNCA repitas una acción que en el pasado provocó una pérdida en una situación similar (revisa la sección RECUERDOS VECTORIALES).
         2. DISTINCIÓN ENTRE MANO PRIVADA Y MESA COMPARTIDA: Si la pareja o trío está en tu mano privada (Pocket Pair / Set Oculto), juega muy agresivo por valor. Si la pareja es de la mesa compartida, no asumas tener la mejor mano.
         3. IMPREDECIBILIDAD Y ESTRATEGIA MIXTA GTO: Mezcla tus secuencias usando la Semilla de Frecuencia para alternar entre apuestas de valor, slowplays y semifaroles.
-        4. ANÁLISIS DE BLOCKERS Y LÍNEAS INCONSISTENTES: Si la mesa es SECA y el rival sube agresivamente, evalúa si es un FAROL INCONSISTENTE y paga (CALL/RAISE) para cazarlo.
-        5. MODO PUSH/FOLD EN STACK CORTO (<180 fichas): En stack corto, elimina min-raises. Juega ALL_IN directo con cualquier As (A2+), Pareja (22+), Reyes (K5+) o cartas altas.
+        4. ANÁLISIS DE TEXTURA Y RANGOS: Evalúa qué combos de valor (sets, dobles parejas, proyectos) y faroles conecta la textura de la mesa con el rango y perfil del rival.
+        5. MODO PUSH/FOLD EN STACK CORTO (<= 10 BB): En stack corto (<= 10 BB efectivos), prioriza ALL_IN o FOLD según rangos Nash en lugar de min-raises.
         6. ACCIONES LEGALES ESTRICTAS: Selecciona exclusivamente FOLD, CHECK, CALL, RAISE o ALL_IN. Para RAISE, indica 'monto_apuesta'.
         ============================================================
         """
@@ -235,13 +235,8 @@ class PokerAgent:
         else:
             request_contents = [prompt]
 
-        candidatos = list(dict.fromkeys([
-            self.primary_model,
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-2.5-flash-lite"
-        ]))
+        prioridad = list(getattr(config, "GEMINI_MODELS_PRIORITY", [self.primary_model]))
+        candidatos = list(dict.fromkeys([self.primary_model, *prioridad]))
         ahora = time.time()
         modelos_activos = [m for m in candidatos if ahora >= self.model_cooldown_until.get(m, 0)]
         if not modelos_activos:
@@ -315,17 +310,36 @@ class PokerAgent:
 
 _gemma_model_instance = None
 
+
+def validar_ruta_gemma_local(path_str: Optional[str] = None) -> Tuple[bool, str]:
+    """Valida GEMMA_LOCAL_MODEL_PATH según el SO actual y degrada con aviso claro si no existe."""
+    so = platform.system()
+    raw = path_str if path_str is not None else getattr(config, "GEMMA_LOCAL_MODEL_PATH", "")
+    raw = str(raw or "").strip()
+    if not raw:
+        return False, f"GEMMA_LOCAL_MODEL_PATH no configurado en {so}; inferencia local deshabilitada."
+    if so != "Windows" and re.match(r"^[A-Za-z]:\\", raw):
+        return False, f"Ruta Windows '{raw}' incompatible con {so}; configura GEMMA_LOCAL_MODEL_PATH en .env."
+    expanded = Path(os.path.expandvars(os.path.expanduser(raw)))
+    if not expanded.is_file():
+        return False, f"No se encontró el archivo GGUF en '{expanded}' ({so}); degradando a Gemini/GTO."
+    return True, str(expanded)
+
+
 def precargar_gemma_local():
     """Carga de forma perezosa el modelo Gemma 4B Local GGUF en memoria."""
     global _gemma_model_instance
     if _gemma_model_instance is not None:
         return _gemma_model_instance
+    ok, info = validar_ruta_gemma_local()
+    if not ok:
+        print(f"⚠️ [LLM LOCAL] {info}")
+        return None
     try:
         from llama_cpp import Llama
-        model_path = getattr(config, "GEMMA_LOCAL_MODEL_PATH", r"C:\Users\SATAP\.android\models\gemma-4-4b\gemma-4-E4B_q4_0-it.gguf")
-        print(f"💻 [LLM LOCAL] Cargando Gemma 4B desde: {model_path}...")
+        print(f"💻 [LLM LOCAL] Cargando Gemma 4B desde: {info}...")
         _gemma_model_instance = Llama(
-            model_path=model_path,
+            model_path=info,
             n_ctx=2048,
             n_threads=6,
             verbose=False

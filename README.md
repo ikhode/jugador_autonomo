@@ -1,6 +1,6 @@
 # ♠️ Bot Autónomo de Póquer con IA Gemini & Playwright
 
-Este proyecto implementa un jugador autónomo de póquer web impulsado por la API oficial de **Gemini AI** (`gemini-3.8-flash`) y **Playwright**.
+Este proyecto implementa un jugador autónomo de póquer web impulsado por el motor GTO en [poker_gto_engine.py](file:///Users/mompra/Documents/config%20poker/poker_gto_engine.py), **Gemini AI** (prioridad de modelos centralizada en `config.GEMINI_MODELS_PRIORITY`, por defecto `gemini-2.5-flash`) y **Playwright**.
 
 Puede conectarse a **cualquier URL** (tanto local como `http://localhost` o cualquier sitio de poker web en Internet), iniciar sesión automáticamente con credenciales configurables, analizar la mesa visualmente mediante visión por computadora con IA y tomar decisiones óptimas en tiempo real (`FOLD`, `CHECK`, `CALL`, `RAISE`).
 
@@ -52,8 +52,11 @@ GAME_URL=http://localhost/juego
 GAME_USER=tu_usuario_aqui
 GAME_PASSWORD=tu_password_aqui
 HEADLESS=false
-SLOW_MO=500
-INTERVALO_ANALISIS_SEG=3
+SLOW_MO=100
+MODO=gemini            # determinista | hibrido | gemini
+GEMINI_MODEL=gemini-2.5-flash
+PLAY_MONEY_ONLY=true
+GEMMA_LOCAL_MODEL_PATH=
 ```
 
 - Si el juego está en una URL pública (ejemplo: `https://mipokeronline.com/login`), simplemente actualiza `LOGIN_URL` y `GAME_URL`.

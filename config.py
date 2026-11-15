@@ -13,10 +13,31 @@ GAME_PASSWORD = os.getenv("GAME_PASSWORD", "")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-ACTIVE_MODEL = os.getenv("ACTIVE_MODEL", "gemini-2.5-flash")  # "gemini-2.5-flash", "gemma-4b-local", "gto-heuristic"
-GEMMA_LOCAL_MODEL_PATH = os.getenv("GEMMA_LOCAL_MODEL_PATH", r"C:\Users\SATAP\.android\models\gemma-4-4b\gemma-4-E4B_q4_0-it.gguf")
+GEMINI_MODELS_PRIORITY = list(dict.fromkeys([
+    GEMINI_MODEL,
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-1.5-flash",
+]))
+ACTIVE_MODEL = os.getenv("ACTIVE_MODEL", GEMINI_MODEL)
+AVAILABLE_MODELS = list(dict.fromkeys([*GEMINI_MODELS_PRIORITY, "gemma-4b-local", "gto-heuristic"]))
+GEMMA_LOCAL_MODEL_PATH = os.getenv("GEMMA_LOCAL_MODEL_PATH", "")
 
-MODO = os.getenv("MODO", "gemini")  # "gemini" o "heuristico"
+MODO = os.getenv("MODO", "gemini").strip().lower()  # "determinista" | "hibrido" | "gemini"
+HYBRID_EV_DIFF_THRESHOLD_BB = float(os.getenv("HYBRID_EV_DIFF_THRESHOLD_BB", "0.5"))
+
+
+def obtener_modo_activo() -> str:
+    """Normaliza MODO y ACTIVE_MODEL al esquema único: determinista | hibrido | gemini."""
+    if str(ACTIVE_MODEL or "").strip().lower() in ("gto-heuristic", "determinista", "heuristico"):
+        return "determinista"
+    m = str(MODO or "gemini").strip().lower()
+    if m in ("heuristico", "determinista", "gto"):
+        return "determinista"
+    if m in ("hibrido", "hybrid"):
+        return "hibrido"
+    return "gemini"
 USAR_CAPTURA = os.getenv("USAR_CAPTURA", "false").lower() == "true"
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 HOLD_BROWSER_OPEN = os.getenv("HOLD_BROWSER_OPEN", "true").lower() == "true"

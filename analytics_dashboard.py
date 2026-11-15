@@ -2638,8 +2638,9 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
             elif parsed.path == "/api/bot/model":
                 import config
                 resp = {
-                    "active_model": getattr(config, "ACTIVE_MODEL", "gemini-3.1-flash-lite"),
-                    "available_models": ["gemini-3.1-flash-lite", "gemma-4b-local", "gto-heuristic"]
+                    "active_model": getattr(config, "ACTIVE_MODEL", config.GEMINI_MODEL),
+                    "available_models": list(getattr(config, "AVAILABLE_MODELS", [config.GEMINI_MODEL, "gemma-4b-local", "gto-heuristic"])),
+                    "modo": config.obtener_modo_activo() if hasattr(config, "obtener_modo_activo") else getattr(config, "MODO", "gemini"),
                 }
                 body = json.dumps(resp, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
@@ -2687,7 +2688,7 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
                         body_data = json.loads(raw.decode('utf-8'))
                     except Exception:
                         pass
-                new_mod = body_data.get("model") or "gemini-3.1-flash-lite"
+                new_mod = body_data.get("model") or getattr(config, "GEMINI_MODEL", "gemini-2.5-flash")
                 config.ACTIVE_MODEL = new_mod
 
                 if new_mod == "gemma-4b-local":
