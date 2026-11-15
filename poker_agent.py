@@ -37,12 +37,15 @@ class PokerAgent:
         key = api_key or config.GEMINI_API_KEY
         if not key:
             print("⚠️ ADVERTENCIA: No se encontró GEMINI_API_KEY en el archivo .env o variables de entorno.")
-        http_opts = types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1))
+        http_opts = types.HttpOptions(
+            timeout=3500,
+            retry_options=types.HttpRetryOptions(attempts=1),
+        )
         self.client = genai.Client(api_key=key, http_options=http_opts) if key else genai.Client(http_options=http_opts)
         self.primary_model = config.GEMINI_MODEL
         self.model_cooldown_until: dict[str, float] = {}
 
-    def analizar_pantalla(self, image_bytes: bytes, dom_data: Optional[dict] = None) -> PokerDecision:
+    def analizar_pantalla(self, image_bytes: Optional[bytes] = None, dom_data: Optional[dict] = None) -> PokerDecision:
         dom_info_str = ""
         historial_str = ""
         perfil_rival_str = ""
@@ -177,7 +180,14 @@ class PokerAgent:
         ============================================================
         """
 
-        img_bytes_opt, mime_type = optimizar_imagen(image_bytes)
+        if image_bytes:
+            img_bytes_opt, mime_type = optimizar_imagen(image_bytes)
+            request_contents = [
+                types.Part.from_bytes(data=img_bytes_opt, mime_type=mime_type),
+                prompt,
+            ]
+        else:
+            request_contents = [prompt]
 
         candidatos = list(dict.fromkeys([
             self.primary_model,
@@ -191,19 +201,20 @@ class PokerAgent:
         if not modelos_activos:
             modelos_activos = candidatos
 
+        gen_config_kwargs = {
+            "response_mime_type": "application/json",
+            "response_schema": PokerDecision,
+            "temperature": 0.1,
+        }
+        if hasattr(types, "ThinkingConfig"):
+            gen_config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+
         for model_name in modelos_activos:
             try:
                 response = self.client.models.generate_content(
                     model=model_name,
-                    contents=[
-                        types.Part.from_bytes(data=img_bytes_opt, mime_type=mime_type),
-                        prompt
-                    ],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=PokerDecision,
-                        temperature=0.1
-                    )
+                    contents=request_contents,
+                    config=types.GenerateContentConfig(**gen_config_kwargs),
                 )
 
                 raw_text = (response.text or "").strip()

@@ -64,6 +64,10 @@ class TestMultiplayerLiveHUD(unittest.TestCase):
         self.profiler = OpponentProfiler(db_path=self.db_path)
 
     def tearDown(self):
+        try:
+            self.profiler._engine.dispose()
+        except Exception:
+            pass
         self.tmpdir.cleanup()
 
     def test_01_mesa_con_dos_oponentes_excluye_hero(self):
@@ -195,10 +199,26 @@ class TestMultiplayerLiveHUD(unittest.TestCase):
 
         # Simular reinicio creando una nueva instancia de OpponentProfiler apuntando a la misma DB
         profiler_reiniciado = OpponentProfiler(db_path=self.db_path)
-        recuperado = profiler_reiniciado.obtener_perfil_explotativo("P_CS", "StationPro")
-        self.assertGreaterEqual(recuperado["manos"], MIN_SAMPLE_FOR_CLASSIFICATION)
-        self.assertEqual(recuperado["estilo"], "Calling Station")
-        self.assertIn("value bet", recuperado["recomendacion_tactica"].lower())
+        try:
+            recuperado = profiler_reiniciado.obtener_perfil_explotativo("P_CS", "StationPro")
+            self.assertGreaterEqual(recuperado["manos"], MIN_SAMPLE_FOR_CLASSIFICATION)
+            self.assertEqual(recuperado["estilo"], "Calling Station")
+            self.assertIn("value bet", recuperado["recomendacion_tactica"].lower())
+        finally:
+            profiler_reiniciado._engine.dispose()
+
+    def test_11_sanitizacion_nicknames_dom_y_unicidad_por_asiento(self):
+        monitor = LiveTableMonitor(self.profiler, modalidad="Twister 3-Max", max_asientos=3, hero_nickname="Josuemontes19", persist_live_file=False)
+        # Simular frames consecutivos con stack pegado al nombre y un timer temporal en el mismo asiento
+        monitor.actualizar_desde_dom(_crear_dom_jugadores(3, [{"seat": 1, "nickname": "DiorSauvage 470", "stack": 470}, {"seat": 2, "nickname": "modeAtaraxia 440", "stack": 440}], 3))
+        monitor.actualizar_desde_dom(_crear_dom_jugadores(3, [{"seat": 1, "nickname": "DiorSauvage 510", "stack": 510}, {"seat": 2, "nickname": "modeAtaraxia 490", "stack": 490}], 3))
+        monitor.actualizar_desde_dom(_crear_dom_jugadores(3, [{"seat": 1, "nickname": "Time: 12 490", "stack": 490}, {"seat": 2, "nickname": "modeAtaraxia 490", "stack": 490}], 3))
+
+        opps = monitor.obtener_perfiles_oponentes()
+        conteos = monitor.obtener_conteos_mesa()
+        self.assertLessEqual(conteos["numero_oponentes_mesa"], 2)
+        self.assertNotIn("Time: 12", [o["nickname"] for o in opps])
+        self.assertIn("modeAtaraxia", [o["nickname"] for o in opps])
 
 
 if __name__ == "__main__":

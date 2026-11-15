@@ -46,7 +46,6 @@ class GameTracker:
         self.position_name = "DESCONOCIDA"
         self.current_street = "PREFLOP"
         self.current_round_no = 1
-        live_monitor.iniciar_nueva_mano()
         self.hero_just_acted_ts = 0.0
 
     def registrar_evento(self, tipo: str, detalle: str):
@@ -222,9 +221,15 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
         // Extracción multijugador por cada asiento (.player-area)
         const jugadoresMesa = Array.from(document.querySelectorAll('.player-area')).map((area, idx) => {
             const isHero = area.classList.contains('my-player');
-            const nickEl = area.querySelector('.player-name, .nickname, .username, .name, [class*="name"]');
-            const nickname = (nickEl?.innerText || '').replace(/\s+/g, ' ').trim();
-            const pid = area.getAttribute('data-player-id') || area.getAttribute('data-player-code') || area.id || '';
+            const nickEl = area.querySelector('.player-name, .nickname, .username')
+                || Array.from(area.querySelectorAll('.name')).find(el => !el.querySelector('.player-chips, .chips-amount, .stack-amount'));
+            let nickname = (nickEl?.innerText || '').split('\n')[0].replace(/\s+/g, ' ').trim();
+            if (/^(Time|Tiempo)\s*:\s*\d+/i.test(nickname) || /^\d+$/.test(nickname)) {
+                nickname = '';
+            } else {
+                nickname = nickname.replace(/\s+\$?[\d,]+(?:\.\d+)?$/, '').trim();
+            }
+            const pid = area.getAttribute('data-player-id') || area.getAttribute('data-player-code') || '';
             const stackTxt = (area.querySelector('.player-chips, .chips-amount, .stack-amount, .player-balance')?.innerText || '0').trim();
             const betTxt = (area.querySelector('.player-bet .amount, .bet-amount')?.innerText || '0').trim();
             const areaTxt = (area.innerText || '').trim();
@@ -798,6 +803,11 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
     btn_replay = config.SELECTORS.get("btn_replay", config.SELECTORS["replay"])
     raise_input_sel = config.SELECTORS.get("raise_input", "input.betting-input")
 
+    opciones_dom = str(
+        (dom_data or {}).get("botones_visibles", "")
+        or (dom_data or {}).get("opciones_disponibles", "")
+    ).upper()
+
     try:
         # Si ya está abierto el popup de advertencia de Fold/Check, resolverlo primero
         if resolver_popup_fold_check_gratis(target):
@@ -806,15 +816,15 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
         if accion == "REPLAY":
             print("🔄 Fin de partida detectado -> Clic en 'Jugar de nuevo'")
             if not clicar_texto_modal_universal(target, ["Jugar de nuevo", "Replay", "Volver a jugar"], "Jugar de nuevo"):
-                intentar_click(target, btn_replay, "Jugar de nuevo", timeout=2000)
+                intentar_click(target, btn_replay, "Jugar de nuevo", timeout=800)
             esperar_carga_dom(target)
             accion_ejecutada = "REPLAY"
 
         elif accion == "START_GAME":
             print("🎮 Lobby detectado -> Clic en Tarjeta de Juego e Iniciar Partida")
-            intentar_click(target, config.SELECTORS["select_game_card"], "Tarjeta de Juego Twister", timeout=2000)
+            intentar_click(target, config.SELECTORS["select_game_card"], "Tarjeta de Juego Twister", timeout=800)
             esperar_carga_dom(target)
-            if not intentar_click(target, config.SELECTORS["start_match_btn"], "Botón Iniciar Partida", timeout=2000):
+            if not intentar_click(target, config.SELECTORS["start_match_btn"], "Botón Iniciar Partida", timeout=800):
                 clicar_texto_modal_universal(target, ["Jugar Poker", "Jugar"], "Botón Jugar Poker")
             esperar_carga_dom(target)
             accion_ejecutada = "START_GAME"
@@ -824,42 +834,46 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
             # Si Check está visible, NUNCA hacer clic en Fold (evita el popup de advertencia y aprovecha la carta gratis).
             if intentar_click(target, btn_check, "Botón Check (Gratis prioritario en lugar de Fold)", timeout=0):
                 return "CHECK"
-            intentar_click(target, btn_fold, "Botón Fold", timeout=2000)
-            time.sleep(0.15)
+            intentar_click(target, btn_fold, "Botón Fold", timeout=600)
+            time.sleep(0.12)
             if resolver_popup_fold_check_gratis(target):
                 return "CHECK"
             accion_ejecutada = "FOLD"
 
         elif accion == "CHECK":
-            if intentar_click(target, btn_check, "Botón Check", timeout=1500):
+            check_posible = (not opciones_dom) or ("CHECK" in opciones_dom or "PASAR" in opciones_dom)
+            if check_posible and intentar_click(target, btn_check, "Botón Check", timeout=400):
                 accion_ejecutada = "CHECK"
             else:
                 respaldo = decidir_accion_rapida(dom_data or {})
                 if respaldo.accion in ("RAISE", "CALL"):
                     print("⚠️ Check no disponible (hubo apuesta), pero mano es fuerte/jugable -> Realizando Call...")
-                    if intentar_click(target, btn_call, "Botón Call (Fallback Mano Fuerte)", timeout=1500):
+                    if intentar_click(target, btn_call, "Botón Call (Fallback Mano Fuerte)", timeout=350):
                         accion_ejecutada = "CALL"
                     else:
-                        intentar_click(target, btn_fold, "Botón Fold (Fallback)", timeout=1500)
+                        intentar_click(target, btn_fold, "Botón Fold (Fallback)", timeout=350)
                         accion_ejecutada = "FOLD"
                 else:
                     print("🛡️ Check no disponible (hubo apuesta rival) y mano débil -> Realizando Fold seguro...")
-                    if intentar_click(target, btn_fold, "Botón Fold (Protección Stack)", timeout=1500):
+                    if intentar_click(target, btn_fold, "Botón Fold (Protección Stack)", timeout=350):
                         accion_ejecutada = "FOLD"
                     else:
-                        intentar_click(target, btn_call, "Botón Call (Último recurso)", timeout=1500)
+                        intentar_click(target, btn_call, "Botón Call (Último recurso)", timeout=350)
                         accion_ejecutada = "CALL"
 
         elif accion == "CALL":
-            if intentar_click(target, btn_call, "Botón Call", timeout=2000):
+            call_posible = (not opciones_dom) or ("CALL" in opciones_dom or "IGUALAR" in opciones_dom or "PAGAR" in opciones_dom)
+            if call_posible and intentar_click(target, btn_call, "Botón Call", timeout=500):
                 accion_ejecutada = "CALL"
             else:
                 print("⚠️ Call no disponible. Intentando Check o Fold...")
-                if intentar_click(target, btn_check, "Botón Check (Fallback)", timeout=1500):
+                if intentar_click(target, btn_check, "Botón Check (Fallback)", timeout=300):
                     accion_ejecutada = "CHECK"
-                else:
-                    intentar_click(target, btn_fold, "Botón Fold (Fallback)", timeout=1500)
+                elif intentar_click(target, btn_fold, "Botón Fold (Fallback)", timeout=300):
                     accion_ejecutada = "FOLD"
+                else:
+                    intentar_click(target, btn_allin, "Botón All-in (Fallback Call)", timeout=300)
+                    accion_ejecutada = "ALL_IN"
 
         elif accion == "RAISE":
             monto = getattr(decision, "monto_apuesta", 0) or getattr(decision, "monto", 0) or 0
@@ -869,27 +883,29 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
                     inp = target.locator("input.betting-input, input.raise-input").first
                     if inp.is_visible():
                         print(f"💰 Ajustando importe de subida a: {monto}")
-                        inp.fill(str(monto), timeout=300)
+                        inp.fill(str(monto), timeout=250)
                 except Exception:
                     pass
 
-            if intentar_click(target, btn_raise, "Botón Raise / Apuesta", timeout=1500):
+            if intentar_click(target, btn_raise, "Botón Raise / Apuesta", timeout=0):
                 accion_ejecutada = "RAISE"
             elif clicar_texto_modal_universal(target, ["Raise a", "Raise", "Bet", "Subir", "Apostar"], "Botón Raise (Texto)"):
                 accion_ejecutada = "RAISE"
-            elif intentar_click(target, btn_call, "Botón Call (Fallback Raise)", timeout=1500):
+            elif intentar_click(target, btn_raise, "Botón Raise / Apuesta", timeout=400):
+                accion_ejecutada = "RAISE"
+            elif intentar_click(target, btn_call, "Botón Call (Fallback Raise)", timeout=300):
                 accion_ejecutada = "CALL"
             else:
-                intentar_click(target, btn_check, "Botón Check (Fallback Raise)", timeout=1000)
+                intentar_click(target, btn_check, "Botón Check (Fallback Raise)", timeout=300)
                 accion_ejecutada = "CHECK"
 
         elif accion in ("ALL_IN", "ALLIN"):
-            if intentar_click(target, btn_allin, "Botón All-in", timeout=2000):
+            if intentar_click(target, btn_allin, "Botón All-in", timeout=500):
                 accion_ejecutada = "ALL_IN"
-            elif intentar_click(target, btn_raise, "Botón Raise (Fallback All-in)", timeout=2000):
+            elif intentar_click(target, btn_raise, "Botón Raise (Fallback All-in)", timeout=350):
                 accion_ejecutada = "RAISE"
             else:
-                intentar_click(target, btn_call, "Botón Call (Fallback All-in)", timeout=1500)
+                intentar_click(target, btn_call, "Botón Call (Fallback All-in)", timeout=300)
                 accion_ejecutada = "CALL"
 
         elif accion == "WAIT":
@@ -1246,7 +1262,7 @@ def main():
                         continue
 
                     target_mesa = obtener_target_mesa(page)
-                    esperar_sincronizacion_turno(target_mesa, timeout_max_ms=1200)
+                    esperar_sincronizacion_turno(target_mesa, timeout_max_ms=350)
 
                     # Si el recuadro "¿Seguro que quieres foldear?" está en pantalla, clic inmediato en Check gratis
                     if resolver_popup_fold_check_gratis(target_mesa):
@@ -1308,6 +1324,22 @@ def main():
 
                     # CASO 1: ES NUESTRO TURNO Y AÚN NO HEMOS CONSULTADO A GEMINI PARA ESTE TURNO
                     if es_mi_turno and turno_id_actual != ultimo_turno_id:
+                        if not mis_cartas:
+                            time.sleep(0.15)
+                            dom_data = target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or dom_data
+                            mis_cartas = dom_data.get('mis_cartas', '') or " ".join(tracker.my_cards)
+                            comunitarias = dom_data.get('cartas_comunitarias', '') or " ".join(tracker.community_cards)
+                            bote = dom_data.get('bote', '') or tracker.last_pot or 0
+                            botones = dom_data.get('botones_visibles', '') or dom_data.get('opciones_disponibles', '')
+                            dom_data["mis_cartas"] = mis_cartas
+                            dom_data["cartas_comunitarias"] = comunitarias
+                            dom_data["bote"] = bote
+                            dom_data["gto_preflop"] = clasificar_mano_preflop(mis_cartas)
+                            dom_data["gto_math"] = calcular_pot_odds_y_sizing(bote, dom_data.get('a_igualar'), dom_data.get('mi_stack'))
+                            dom_data["gto_textura"] = analizar_textura_mesa_y_blockers(mis_cartas, comunitarias)
+                            dom_data["gto_combinacion"] = evaluar_combinacion_mano_y_mesa(mis_cartas, comunitarias)
+                            turno_id_actual = f"{mis_cartas}|{comunitarias}|{bote}|{botones}"
+
                         ultimo_turno_id = turno_id_actual
                         ultimo_tiempo_actividad = time.time()
 
@@ -1317,23 +1349,36 @@ def main():
                                 owner_page.bring_to_front()
                         except Exception:
                             pass
-                        screenshot_bytes = owner_page.screenshot(type="jpeg", quality=75)
 
                         print(f"\n--- [Turno Hero #{ciclo}] 🎴 Mis Cartas: {mis_cartas or 'N/A'} | Mesa: {comunitarias or '-'} | Bote: {bote} ---")
-                        print("🤖 Consultando a Gemini AI (1 consulta única, timeout máx 4.5s)...")
+
+                        # Fast-path GTO 0ms para decisiones preflop triviales (evita esperar 3.6-4.5s de API en manos BASURA)
+                        botones_up = str(botones or "").upper()
+                        gto_tier = (dom_data.get("gto_preflop") or {}).get("tier", "")
+                        es_preflop_basura = (not comunitarias) and ("BASURA" in str(gto_tier).upper()) and ("CHECK" not in botones_up) and ("FOLD" in botones_up)
 
                         decision = None
                         decision_source = "gemini"
                         t0 = time.time()
-                        try:
-                            decision = consultar_gemini_con_timeout(agent, screenshot_bytes, dom_data=dom_data, timeout_seg=4.5)
-                        except Exception as e:
-                            print(f"⚠️ Excepción al consultar Gemini AI: {e}")
 
-                        if not decision or decision.accion in ("WAIT", "START_GAME", "REPLAY"):
-                            print("🛡️ [RESPALDO DE SEGURIDAD 0ms] Ejecutando acción defensiva rápida...")
+                        if es_preflop_basura:
                             decision = decidir_accion_rapida(dom_data)
-                            decision_source = "gto_fallback_0ms"
+                            decision_source = "gto_fastpath_0ms"
+                            print("⚡ [FAST-PATH GTO 0ms] Mano BASURA preflop sin Check gratis -> Fold instantáneo.")
+                        else:
+                            tiene_contexto_dom_completo = bool(mis_cartas and botones)
+                            screenshot_bytes = None if tiene_contexto_dom_completo else owner_page.screenshot(type="jpeg", quality=75)
+                            modo_consulta = "DOM+WS rápido" if tiene_contexto_dom_completo else "Visión+DOM"
+                            print(f"🤖 Consultando a Gemini AI ({modo_consulta}, timeout máx 3.6s)...")
+                            try:
+                                decision = consultar_gemini_con_timeout(agent, screenshot_bytes, dom_data=dom_data, timeout_seg=3.6)
+                            except Exception as e:
+                                print(f"⚠️ Excepción al consultar Gemini AI: {e}")
+
+                            if not decision or decision.accion in ("WAIT", "START_GAME", "REPLAY"):
+                                print("🛡️ [RESPALDO DE SEGURIDAD 0ms] Ejecutando acción defensiva rápida...")
+                                decision = decidir_accion_rapida(dom_data)
+                                decision_source = "gto_fallback_0ms"
 
                         dt = time.time() - t0
                         print(f"⚡ [DECISIÓN IA ({dt:.2f}s)]: {decision.accion} | Confianza: {decision.confianza:.2f} | {decision.evaluacion}")
@@ -1354,7 +1399,7 @@ def main():
                                 )
                             except Exception:
                                 pass
-                        time.sleep(0.55)
+                        time.sleep(0.25)
                         ciclo += 1
 
                     # CASO 2: MODAL O MESA FINALIZADA DETECTADA (Fin de partida / Eliminado 'Vacío' / Replay / Sit-Out / Iniciar partida / PopupCheckGratis)
@@ -1383,8 +1428,11 @@ def main():
                             time.sleep(1.8)
                             tracker.reset_mano()
 
-                    # CASO 3: AUTORRECUPERACIÓN SI ESTAMOS EN EL LOBBY SIN ENTRAR A MESA HACE MÁS DE 15 SEGUNDOS
-                    elif not es_mi_turno and (time.time() - ultimo_tiempo_actividad > 15):
+                    # CASO 3: AUTORRECUPERACIÓN SI ESTAMOS EN EL LOBBY SIN ENTRAR A MESA (evita interrumpir manos activas)
+                    elif not es_mi_turno and (
+                        (not (mis_cartas or comunitarias or botones) and time.time() - ultimo_tiempo_actividad > 18)
+                        or (time.time() - ultimo_tiempo_actividad > 45)
+                    ):
                         ultimo_tiempo_actividad = time.time()
                         print("⏳ Tiempo de inactividad detectado en lobby. Re-ejecutando inicio de torneo automático...")
                         page = navegar_al_juego(page)

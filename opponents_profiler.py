@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -237,7 +237,7 @@ class OpponentProfiler:
                 oponente.last_seat = int(seat)
             if status:
                 oponente.last_status = str(status).upper()
-            oponente.ultima_actualizacion = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            oponente.ultima_actualizacion = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             return oponente
 
         if not create_if_missing:
@@ -262,7 +262,7 @@ class OpponentProfiler:
             last_seat=int(seat) if seat is not None else None,
             last_status=str(status).upper() if status else "ACTIVE",
             known_aliases=_add_alias("[]", target_id, nick),
-            ultima_actualizacion=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            ultima_actualizacion=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         )
         session.add(oponente)
         return oponente

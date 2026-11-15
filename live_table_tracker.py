@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -69,6 +70,22 @@ def _parse_num(val: Any) -> float:
         return float(s) if s else 0.0
     except Exception:
         return 0.0
+
+
+def _sanitizar_nickname(raw_nick: Optional[str]) -> str:
+    """Limpia artefactos de DOM (timers 'Time: 12' o stacks pegados) del nickname."""
+    txt = re.sub(r"\s+", " ", str(raw_nick or "")).strip()
+    if not txt:
+        return ""
+    if re.match(r"^(Time|Tiempo)\s*:\s*\d+", txt, flags=re.IGNORECASE):
+        return ""
+    # Si viene con formato "Nombre 490" o "Nombre 1,500" al final, quitar el número de stack
+    cleaned = re.sub(r"\s+\$?[\d,]+(?:\.\d+)?$", "", txt).strip()
+    if cleaned and not cleaned.isdigit():
+        txt = cleaned
+    if txt.isdigit():
+        return ""
+    return txt
 
 
 class LiveTableMonitor:
@@ -165,7 +182,7 @@ class LiveTableMonitor:
         """Inserta o actualiza un jugador en la mesa sin duplicar ni mezclar identidades."""
         with self._lock:
             pid = str(player_id or "").strip()
-            nick = str(nickname or "").strip()
+            nick = _sanitizar_nickname(nickname)
             norm_status = normalizar_estado_jugador(status)
 
             if seat is not None and int(seat) > self.max_asientos:
@@ -178,6 +195,9 @@ class LiveTableMonitor:
                     self.hero_nickname = nick
                 if seat is not None:
                     self.hero_seat = int(seat)
+                    # Garantizar que ningún rival quede registrado en el asiento del héroe
+                    for k_seat in [k for k, p in self.players.items() if p.get("seat") == int(seat)]:
+                        del self.players[k_seat]
                 if stack is not None:
                     self.hero_stack = _parse_num(stack)
                 # Si el héroe estaba previamente en self.players por error, eliminarlo
@@ -196,6 +216,14 @@ class LiveTableMonitor:
 
             existing_key = self._buscar_clave_existente(pid, nick, seat)
             now_ts = time.time()
+
+            # Garantizar unicidad por asiento: si otro jugador distinto ocupaba este mismo seat, reemplazarlo
+            if seat is not None:
+                for k_old in [
+                    k for k, p in self.players.items()
+                    if p.get("seat") == int(seat) and k != existing_key
+                ]:
+                    del self.players[k_old]
 
             if existing_key is None:
                 canonical_key = pid or nick or f"seat_{seat}"
