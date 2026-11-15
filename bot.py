@@ -1690,9 +1690,12 @@ def get_local_decision_maker():
     if _local_decision_maker is None:
         _local_strategic_engine = StrategicEngine(strategy_model=None)
         _local_opponent_model = OpponentModel(model_type="random_forest")
-        # Train with baseline dummy data if not already trained
+        # Train with baseline dummy data if not already trained (10 features)
         import numpy as np
-        X_train = np.array([[50, 10, 0, 0.25, 0.15, 1, 2, 0], [200, 50, 3, 0.25, 0.15, 0, 1, 3]])
+        X_train = np.array([
+            [50, 10, 0.166, 0, 0.5, 0.25, 0.15, 1, 2, 0],
+            [200, 50, 0.2, 3, 0.7, 0.25, 0.15, 0, 1, 3]
+        ])
         y_train = np.array([0, 1])
         _local_opponent_model.train(X_train, y_train)
         _local_game_state_mgr = GameStateManager()
