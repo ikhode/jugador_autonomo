@@ -2348,6 +2348,19 @@ def main():
                     def handle_websocket(ws):
                         print(f"🔌 [WEBSOCKET CONECTADO] {ws.url}")
 
+                        def convertir_cartas_raw(cards_list: list) -> list:
+                            suit_map = {"H": "♥", "S": "♠", "C": "♣", "D": "♦"}
+                            res = []
+                            for c in cards_list:
+                                if isinstance(c, str) and len(c) >= 2 and c != 'X':
+                                    if c[0].upper() in suit_map:
+                                        r = c[1:].upper().replace("T", "10")
+                                        s = suit_map[c[0].upper()]
+                                        res.append(f"{r}{s}")
+                                    else:
+                                        res.append(c)
+                            return res
+
                         def procesar_payload_ipoker(payload_str):
                             try:
                                 if any(k in payload_str for k in ["playerStates", "pots", "cards", "roundNo", "gameCards", "nickname", "playerCode", "isDealer", "winningHand", "classId", "actionCode", "actions"]):
@@ -2460,7 +2473,8 @@ def main():
                                                         tracker.registrar_evento("WS_POSICION", "Hero es DEALER (Ventaja Posicional)")
 
                                                 if "cards" in ps and isinstance(ps["cards"], list):
-                                                    cards_list = [c for c in ps["cards"] if isinstance(c, str) and c != 'X']
+                                                    cards_raw = [c for c in ps["cards"] if isinstance(c, str) and c != 'X']
+                                                    cards_list = convertir_cartas_raw(cards_raw) if cards_raw else []
                                                     # Solo guardar como nuestras cartas privadas la primera vez que recibimos 2 cartas en Preflop
                                                     if len(cards_list) == 2 and len(ps["cards"]) == 2 and tracker.current_street == "PREFLOP":
                                                         if not tracker.my_cards:

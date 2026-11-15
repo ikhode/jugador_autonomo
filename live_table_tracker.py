@@ -375,12 +375,17 @@ class LiveTableMonitor:
             for idx, ps in enumerate(player_states, start=1):
                 if not isinstance(ps, dict):
                     continue
-                pid = str(ps.get("playerCode") or ps.get("playerId") or "").strip()
-                nick = str(ps.get("nickname") or ps.get("name") or "").strip()
-                seat = ps.get("seatNo") or ps.get("seat") or idx
+                seat = ps.get("playerSeat") or ps.get("seatNo") or ps.get("seat") or idx
+                pid = str(ps.get("playerCode") or ps.get("playerId") or ps.get("player_id") or "").strip()
+                nick = str(ps.get("nickname") or ps.get("name") or ps.get("playerName") or "").strip()
                 cards = [c for c in ps.get("cards", []) if isinstance(c, str) and c != "X"] if isinstance(ps.get("cards"), list) else []
-                is_hero = bool(ps.get("isHero") or (len(cards) == 2 and not pid and not nick))
-                raw_state = ps.get("state") or ps.get("status")
+                is_hero = bool(ps.get("isHero") or ps.get("is_hero") or (self.hero_seat is not None and int(seat) == self.hero_seat))
+
+                if not nick and not pid:
+                    nick = f"Rival_Asiento_{seat}" if not is_hero else (self.hero_nickname or "Belnebu")
+                    pid = f"Seat_{seat}" if not is_hero else "Hero"
+
+                raw_state = ps.get("state") or ps.get("status") or "ACTIVO"
                 if ps.get("sitOut") or ps.get("isSittingOut"):
                     raw_state = "SIT_OUT"
                 elif ps.get("disconnected"):
@@ -391,18 +396,17 @@ class LiveTableMonitor:
                 bet = ps.get("bet")
                 is_turn = bool(ps.get("isTurn") or ps.get("hasTurn"))
 
-                if pid or nick or is_hero:
-                    self.actualizar_jugador(
-                        player_id=pid,
-                        nickname=nick,
-                        seat=seat,
-                        status=raw_state,
-                        stack=stack,
-                        bet=bet,
-                        is_hero=is_hero,
-                        is_turn=is_turn,
-                        cards_shown=" ".join(cards) if cards else None,
-                    )
+                self.actualizar_jugador(
+                    player_id=pid,
+                    nickname=nick,
+                    seat=seat,
+                    status=raw_state,
+                    stack=stack,
+                    bet=bet,
+                    is_hero=is_hero,
+                    is_turn=is_turn,
+                    cards_shown=" ".join(cards) if cards else None,
+                )
 
     def obtener_rival_principal(self) -> tuple[str, str]:
         """Devuelve (player_id, nickname) del rival activo principal para compatibilidad con logs."""
