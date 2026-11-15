@@ -191,10 +191,10 @@ class PokerAgent:
 
         candidatos = list(dict.fromkeys([
             self.primary_model,
-            "gemini-3.1-flash-lite",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite"
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-2.5-flash-lite"
         ]))
         ahora = time.time()
         modelos_activos = [m for m in candidatos if ahora >= self.model_cooldown_until.get(m, 0)]

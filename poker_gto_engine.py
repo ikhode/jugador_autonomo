@@ -157,11 +157,45 @@ def evaluar_combinacion_mano_y_mesa(mis_cartas_str: str, comunitarias_str: str) 
     ranks_mano = [r for r, _ in mis_cartas]
     ranks_mesa = [r for r, _ in comunitarias]
 
+    todas_las_cartas = mis_cartas + comunitarias
+    palos_mano = [s for _, s in mis_cartas if s]
+    palos_todas = [s for _, s in todas_las_cartas if s]
+
+    # Detector de Color (Flush)
+    es_color = False
+    for p in set(palos_mano):
+        if palos_todas.count(p) >= 5:
+            es_color = True
+            break
+
+    # Detector de Escalera (Straight)
+    es_escalera = False
+    vals_mano = set(VALORES_RANGO.get(r, 0) for r, _ in mis_cartas if r in VALORES_RANGO)
+    vals_todas = set(VALORES_RANGO.get(r, 0) for r, _ in todas_las_cartas if r in VALORES_RANGO)
+    if 14 in vals_todas:
+        vals_todas.add(1)
+    if 14 in vals_mano:
+        vals_mano.add(1)
+
+    vals_ordenados = sorted(vals_todas)
+    for i in range(len(vals_ordenados) - 4):
+        ventana = vals_ordenados[i:i+5]
+        if ventana[4] - ventana[0] == 4 and len(set(ventana)) == 5:
+            if any(v in vals_mano for v in ventana):
+                es_escalera = True
+                break
+
     es_pareja_en_mano = len(ranks_mano) >= 2 and ranks_mano[0] == ranks_mano[1]
     pareja_en_mesa = any(ranks_mesa.count(r) >= 2 for r in set(ranks_mesa))
     coincidencias = [r for r in ranks_mano if r in ranks_mesa]
 
-    if es_pareja_en_mano and coincidencias:
+    if es_color:
+        categoria = "COLOR (Flush) - MONSTRUO"
+        descripcion = "Color completado usando cartas privadas. Valor máximo."
+    elif es_escalera:
+        categoria = "ESCALERA (Straight) - MONSTRUO"
+        descripcion = "Escalera completada conectando mano y mesa. Valor máximo."
+    elif es_pareja_en_mano and coincidencias:
         categoria = "TRÍO EN SET / FULL (Mano Monstruo Oculta)"
         descripcion = f"Set de {ranks_mano[0]}s en mano emparejado con la mesa. Valor máximo."
     elif not es_pareja_en_mano and len(set(coincidencias)) >= 2:
@@ -195,6 +229,8 @@ def evaluar_combinacion_mano_y_mesa(mis_cartas_str: str, comunitarias_str: str) 
         "categoria": categoria,
         "descripcion": descripcion,
         "es_pareja_en_mano": es_pareja_en_mano,
+        "es_color": es_color,
+        "es_escalera": es_escalera,
         "pareja_en_mesa": pareja_en_mesa,
         "coincidencias_mesa": coincidencias
     }

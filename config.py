@@ -12,8 +12,8 @@ GAME_USER = os.getenv("GAME_USER", "")
 GAME_PASSWORD = os.getenv("GAME_PASSWORD", "")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash-lite")
-ACTIVE_MODEL = os.getenv("ACTIVE_MODEL", "gemini-3.6-flash-lite")  # "gemini-3.1-flash-lite", "gemma-4b-local", "gto-heuristic"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+ACTIVE_MODEL = os.getenv("ACTIVE_MODEL", "gemini-2.5-flash")  # "gemini-2.5-flash", "gemma-4b-local", "gto-heuristic"
 GEMMA_LOCAL_MODEL_PATH = os.getenv("GEMMA_LOCAL_MODEL_PATH", r"C:\Users\SATAP\.android\models\gemma-4-4b\gemma-4-E4B_q4_0-it.gguf")
 
 MODO = os.getenv("MODO", "gemini")  # "gemini" o "heuristico"
@@ -51,14 +51,14 @@ SELECTORS = {
 
     # Mesa de juego (nombres estándar y alias con prefijo btn_)
     "actions_area": ".actions-area, .player-actions",
-    "fold": "#FOLD, button:has-text('Fold'), .action-fold",
-    "btn_fold": "#FOLD, button:has-text('Fold'), .action-fold",
-    "check": "#CHECK, button:has-text('Check'), .action-check",
-    "btn_check": "#CHECK, button:has-text('Check'), .action-check",
-    "call": "#CALL, button:has-text('Call'), .action-call",
-    "btn_call": "#CALL, button:has-text('Call'), .action-call",
-    "raise": "#RAISE, #BET, .action-raise, .action-bet, div#RAISE, div#BET, button:has-text('Raise'), button:has-text('Bet')",
-    "btn_raise": "#RAISE, #BET, .action-raise, .action-bet, div#RAISE, div#BET, button:has-text('Raise'), button:has-text('Bet')",
+    "fold": "#FOLD, button:has-text('Fold'), button:has-text('Retirarse'), .action-fold, div#FOLD, div:has-text('Fold')",
+    "btn_fold": "#FOLD, button:has-text('Fold'), button:has-text('Retirarse'), .action-fold, div#FOLD, div:has-text('Fold')",
+    "check": "#CHECK, button:has-text('Check'), button:has-text('Pasar'), .action-check, div#CHECK, div:has-text('Check'), div:has-text('Pasar')",
+    "btn_check": "#CHECK, button:has-text('Check'), button:has-text('Pasar'), .action-check, div#CHECK, div:has-text('Check'), div:has-text('Pasar')",
+    "call": "#CALL, button:has-text('Call'), button:has-text('Igualar'), .action-call, div#CALL, div:has-text('Call'), div:has-text('Igualar')",
+    "btn_call": "#CALL, button:has-text('Call'), button:has-text('Igualar'), .action-call, div#CALL, div:has-text('Call'), div:has-text('Igualar')",
+    "raise": "#RAISE, #BET, .action-raise, .action-bet, div#RAISE, div#BET, button:has-text('Raise'), button:has-text('Bet'), button:has-text('Subir'), button:has-text('Apostar')",
+    "btn_raise": "#RAISE, #BET, .action-raise, .action-bet, div#RAISE, div#BET, button:has-text('Raise'), button:has-text('Bet'), button:has-text('Subir'), button:has-text('Apostar')",
     "allin": "#ALLIN, button:has-text('All-in'), div:has-text('All-in'), .action-allin",
     "btn_allin": "#ALLIN, button:has-text('All-in'), div:has-text('All-in'), .action-allin",
     "raise_input": "input.betting-input, input[type='range'], input.raise-input",
