@@ -2166,7 +2166,7 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
 
         let lastHandsCount = (RAW_DATA.all_hands || []).length;
         let lastDecisionsCount = (RAW_DATA.all_decisions || []).length;
-<<<<<<< HEAD
+        let lastLiveHash = JSON.stringify(RAW_DATA.live_status || {{}});
         let liveOpponentFilter = 'all';
 
         function setLiveOpponentFilter(filterName) {{
@@ -2347,12 +2347,14 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
                 const newHands = (freshData.all_hands || []).length;
                 const newDecs = (freshData.all_decisions || []).length;
                 const newTelemCount = (freshData.system_reliability && freshData.system_reliability.latency_sample_count) || 0;
+                const freshLiveHash = JSON.stringify(freshData.live_status || {{}});
 
-                if (newHands !== lastHandsCount || newDecs !== lastDecisionsCount || newTelemCount !== lastTelemetrySampleCount) {{
+                if (newHands !== lastHandsCount || newDecs !== lastDecisionsCount || newTelemCount !== lastTelemetrySampleCount || freshLiveHash !== lastLiveHash) {{
                     RAW_DATA = freshData;
                     lastHandsCount = newHands;
                     lastDecisionsCount = newDecs;
                     lastTelemetrySampleCount = newTelemCount;
+                    lastLiveHash = freshLiveHash;
                     applyDashboardFilters();
                 }}
 
@@ -2392,8 +2394,8 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
             initFilters();
             applyDashboardFilters();
             updateLiveMesaUI();
-            setInterval(updateLiveMesaUI, 500);
-            setInterval(checkLiveUpdates, 1200);
+            setInterval(updateLiveMesaUI, 300);
+            setInterval(checkLiveUpdates, 500);
         }});
     </script>
 </body>
