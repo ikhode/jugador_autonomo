@@ -13,5 +13,6 @@ logs/*.jpg
 # Archivos de la IDE y MacOS
 .vscode/
 .idea/
+.artifacts/
 .DS_Store
 __MACOSX/
