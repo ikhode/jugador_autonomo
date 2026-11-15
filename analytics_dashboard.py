@@ -2630,193 +2630,169 @@ def obtener_estado_live_dict() -> Dict[str, Any]:
     return live_info
 
 
-def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browser: bool = True) -> None:
-    """Inicia un servidor HTTP local para visualizar, controlar y filtrar el Dashboard en vivo."""
+def crear_app_flask_dashboard(db_path: Path = DB_PATH):
+    """Crea la aplicación Flask para el Dashboard en tiempo real con modo DEBUG habilitado."""
+    from flask import Flask, jsonify, request, make_response
+    app = Flask(__name__)
+    app.config['DEBUG'] = True
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
     info = generar_dashboard_html(db_path=db_path)
     html_path = Path(info["dashboard_html_path"])
     storage = AnalyticsStorage(db_path=db_path)
     engine = PokerAnalyticsEngine(storage=storage)
 
-    class AnalyticsRequestHandler(http.server.SimpleHTTPRequestHandler):
-        def do_HEAD(self):
-            parsed = urllib.parse.urlparse(self.path)
-            if parsed.path in ("/", "/index.html", "/dashboard"):
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-            elif parsed.path in ("/api/live", "/api/analytics"):
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-            elif parsed.path.startswith("/static/"):
-                rel_path = parsed.path.lstrip("/")
-                file_on_disk = Path(rel_path)
-                if file_on_disk.is_file():
-                    mime = "application/javascript" if rel_path.endswith(".js") else "application/octet-stream"
-                    self.send_response(200)
-                    self.send_header("Content-Type", mime)
-                    self.send_header("Content-Length", str(file_on_disk.stat().st_size))
-                    self.end_headers()
-                    return
-                self.send_error(404, "Archivo estático no encontrado")
-            else:
-                super().do_HEAD()
+def crear_app_flask_dashboard(db_path: Path = DB_PATH):
+    """Crea la aplicación Flask para el Dashboard en tiempo real con modo DEBUG habilitado."""
+    from flask import Flask, jsonify, request, make_response, send_from_directory
+    app = Flask(__name__)
+    app.config['DEBUG'] = True
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
-        def do_GET(self):
-            parsed = urllib.parse.urlparse(self.path)
-            if parsed.path in ("/", "/index.html", "/dashboard"):
-                import time
-                ahora = time.time()
-                if not html_path.exists() or (ahora - getattr(AnalyticsRequestHandler, "_last_html_gen", 0.0) > 10.0):
-                    generar_dashboard_html(db_path=db_path, output_html=html_path, auto_seed_benchmark_if_empty=False)
-                    AnalyticsRequestHandler._last_html_gen = ahora
-                content = html_path.read_bytes()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-                self.send_header("Pragma", "no-cache")
-                self.send_header("Expires", "0")
-                self.send_header("Content-Length", str(len(content)))
-                self.end_headers()
-                self.wfile.write(content)
-            elif parsed.path == "/api/live":
-                live_info = obtener_estado_live_dict()
-                body = json.dumps(live_info, ensure_ascii=False).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-                self.send_header("Pragma", "no-cache")
-                self.send_header("Expires", "0")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            elif parsed.path == "/api/analytics":
-                qs = urllib.parse.parse_qs(parsed.query)
-                filters = {k: v[0] for k, v in qs.items() if v}
-                data = engine.calcular_analiticas_completas(filters if filters else None)
-                data["all_hands"] = storage.consultar_manos(filters if filters else None)
-                data["all_decisions"] = storage.consultar_decisiones(filters if filters else None)
-                live_bundle = _obtener_datos_live_para_dashboard(db_path)
-                data["live_status"] = live_bundle["live_status"]
-                data["historical_profiles"] = live_bundle["historical_profiles"]
-                body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-                self.send_header("Pragma", "no-cache")
-                self.send_header("Expires", "0")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            elif parsed.path == "/api/bot/model":
-                import config
-                resp = {
-                    "active_model": getattr(config, "ACTIVE_MODEL", config.GEMINI_MODEL),
-                    "available_models": list(getattr(config, "AVAILABLE_MODELS", [config.GEMINI_MODEL, "gemma-4b-local", "gto-heuristic"])),
-                    "modo": config.obtener_modo_activo() if hasattr(config, "obtener_modo_activo") else getattr(config, "MODO", "gemini"),
-                }
-                body = json.dumps(resp, ensure_ascii=False).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            elif parsed.path.startswith("/static/"):
-                rel_path = parsed.path.lstrip("/")
-                file_on_disk = Path(rel_path)
-                if file_on_disk.is_file():
-                    mime = "application/javascript" if rel_path.endswith(".js") else "application/octet-stream"
-                    raw = file_on_disk.read_bytes()
-                    self.send_response(200)
-                    self.send_header("Content-Type", mime)
-                    self.send_header("Content-Length", str(len(raw)))
-                    self.end_headers()
-                    self.wfile.write(raw)
-                    return
-                self.send_error(404, "Archivo estático no encontrado")
-            else:
-                self.send_error(404, "Ruta no encontrada")
+    info = generar_dashboard_html(db_path=db_path)
+    html_path = Path(info["dashboard_html_path"])
+    storage = AnalyticsStorage(db_path=db_path)
+    engine = PokerAnalyticsEngine(storage=storage)
 
-        def do_POST(self):
-            parsed = urllib.parse.urlparse(self.path)
-            if parsed.path in ("/api/bot/pause", "/api/bot/resume", "/api/bot/rejoin"):
-                import bot
-                msg = ""
-                if parsed.path == "/api/bot/pause":
-                    bot.bot_paused = True
-                    msg = "Agente pausado en vivo. No ejecutará acciones en mesa."
-                elif parsed.path == "/api/bot/resume":
-                    bot.bot_paused = False
-                    msg = "Agente reanudado en vivo. Bucle reactivo activo."
-                elif parsed.path == "/api/bot/rejoin":
-                    bot.bot_force_rejoin = True
-                    msg = "Solicitada reconexión y navegación automática a nueva partida."
+    @app.route('/', methods=['GET'])
+    @app.route('/index.html', methods=['GET'])
+    @app.route('/dashboard', methods=['GET'])
+    def index():
+        generar_dashboard_html(db_path=db_path, output_html=html_path, auto_seed_benchmark_if_empty=False)
+        content = html_path.read_text(encoding='utf-8')
+        resp = make_response(content)
+        resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        resp.headers['Pragma'] = 'no-cache'
+        resp.headers['Expires'] = '0'
+        return resp
 
-                response_data = json.dumps({
-                    "status": "OK",
-                    "message": msg,
-                    "paused": getattr(bot, "bot_paused", False)
-                }, ensure_ascii=False).encode("utf-8")
+    @app.route('/static/<path:filename>', methods=['GET'])
+    def static_files(filename):
+        return send_from_directory('static', filename)
 
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(response_data)))
-                self.end_headers()
-                self.wfile.write(response_data)
-            elif parsed.path == "/api/bot/model":
-                import config
-                content_len = int(self.headers.get('Content-Length', 0))
-                body_data = {}
-                if content_len > 0:
-                    raw = self.rfile.read(content_len)
-                    try:
-                        body_data = json.loads(raw.decode('utf-8'))
-                    except Exception:
-                        pass
-                new_mod = body_data.get("model") or getattr(config, "GEMINI_MODEL", "gemini-2.5-flash")
-                config.ACTIVE_MODEL = new_mod
+    @app.route('/api/live', methods=['GET'])
+    def api_live():
+        live_info = obtener_estado_live_dict()
+        resp = jsonify(live_info)
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return resp
 
-                if new_mod == "gemma-4b-local":
-                    try:
-                        import threading
-                        from poker_agent import precargar_gemma_local
-                        threading.Thread(target=precargar_gemma_local, daemon=True).start()
-                    except Exception as e:
-                        print(f"⚠️ Error precargando Gemma local: {e}")
+    @app.route('/api/analytics', methods=['GET'])
+    def api_analytics():
+        filters = {k: request.args.get(k) for k in request.args}
+        data = engine.calcular_analiticas_completas(filters if filters else None)
+        data["all_hands"] = storage.consultar_manos(filters if filters else None)
+        data["all_decisions"] = storage.consultar_decisiones(filters if filters else None)
+        live_bundle = _obtener_datos_live_para_dashboard(db_path)
+        data["live_status"] = live_bundle["live_status"]
+        data["historical_profiles"] = live_bundle["historical_profiles"]
+        resp = jsonify(data)
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return resp
 
-                response_data = json.dumps({
-                    "status": "OK",
-                    "message": f"Modelo cambiado a {new_mod} {'(Precargando pesos GGUF en segundo plano)' if new_mod == 'gemma-4b-local' else ''}",
-                    "active_model": config.ACTIVE_MODEL
-                }, ensure_ascii=False).encode("utf-8")
+    @app.route('/api/bot/model', methods=['GET', 'POST'])
+    def api_bot_model():
+        import config
+        if request.method == 'POST':
+            body_data = request.get_json(silent=True) or {}
+            new_mod = body_data.get("model") or getattr(config, "GEMINI_MODEL", "gemini-2.5-flash")
+            config.ACTIVE_MODEL = new_mod
+            if new_mod == "gemma-4b-local":
+                try:
+                    import threading
+                    from poker_agent import precargar_gemma_local
+                    threading.Thread(target=precargar_gemma_local, daemon=True).start()
+                except Exception as e:
+                    print(f"⚠️ Error precargando Gemma local: {e}")
+            resp = jsonify({
+                "status": "OK",
+                "message": f"Modelo cambiado a {new_mod}",
+                "active_model": config.ACTIVE_MODEL
+            })
+            resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            return resp
+        else:
+            resp = jsonify({
+                "active_model": getattr(config, "ACTIVE_MODEL", config.GEMINI_MODEL),
+                "available_models": list(getattr(config, "AVAILABLE_MODELS", [config.GEMINI_MODEL, "gemma-4b-local", "gto-heuristic"])),
+                "modo": config.obtener_modo_activo() if hasattr(config, "obtener_modo_activo") else getattr(config, "MODO", "gemini"),
+            })
+            resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            return resp
 
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-                self.send_header("Content-Length", str(len(response_data)))
-                self.end_headers()
-                self.wfile.write(response_data)
-            else:
-                self.send_error(404, "Ruta no encontrada")
+    @app.route('/api/bot/<action>', methods=['POST'])
+    def api_bot_action(action):
+        import bot
+        msg = ""
+        if action == "pause":
+            bot.bot_paused = True
+            msg = "Agente pausado en vivo. No ejecutará acciones en mesa."
+        elif action == "resume":
+            bot.bot_paused = False
+            msg = "Agente reanudado en vivo. Bucle reactivo activo."
+        elif action == "rejoin":
+            bot.bot_force_rejoin = True
+            msg = "Solicitada reconexión y navegación automática a nueva partida."
+        return jsonify({
+            "status": "OK",
+            "message": msg,
+            "paused": getattr(bot, "bot_paused", False)
+        })
 
-        def log_message(self, format, *args):
-            pass
+    return app
 
-    url = f"http://127.0.0.1:{port}/dashboard"
-    print(f"🌐 Servidor de Analíticas iniciado en: {url}")
-    if open_browser:
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
 
-    http.server.ThreadingHTTPServer.allow_reuse_address = True
-    with http.server.ThreadingHTTPServer(("127.0.0.1", port), AnalyticsRequestHandler) as httpd:
+def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browser: bool = True) -> None:
+    """Inicia un servidor Flask en modo DEBUG (con hot reloading habilitado)."""
+    try:
+        app = crear_app_flask_dashboard(db_path=db_path)
+        url = f"http://127.0.0.1:{port}/dashboard"
+        print(f"🌐 Servidor Flask (modo DEBUG) iniciado en: {url}")
+        if open_browser:
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+        app.run(host="127.0.0.1", port=port, debug=True, use_reloader=False)
+    except Exception as e:
+        print(f"⚠️ Caída a servidor HTTP por defecto: {e}")
         try:
             httpd.serve_forever()
+=======
+def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browser: bool = True) -> None:
+    """Inicia un servidor Flask en modo DEBUG (con hot reloading habilitado)."""
+    try:
+        app = crear_app_flask_dashboard(db_path=db_path)
+        url = f"http://127.0.0.1:{port}/dashboard"
+        print(f"🌐 Servidor Flask (modo DEBUG) iniciado en: {url}")
+        if open_browser:
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+        app.run(host="127.0.0.1", port=port, debug=True, use_reloader=False)
+    except Exception as e:
+        print(f"⚠️ Caída a servidor HTTP por defecto: {e}")
+>>>>>>> befb413 (feat: migrate dashboard HTTP server to Flask in DEBUG mode with hot reloading)
         except KeyboardInterrupt:
             print("\n🛑 Servidor detenido.")
+=======
+def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browser: bool = True) -> None:
+    """Inicia un servidor Flask en modo DEBUG (con hot reloading habilitado)."""
+    try:
+        app = crear_app_flask_dashboard(db_path=db_path)
+        url = f"http://127.0.0.1:{port}/dashboard"
+        print(f"🌐 Servidor Flask (modo DEBUG) iniciado en: {url}")
+        if open_browser:
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+        app.run(host="127.0.0.1", port=port, debug=True, use_reloader=False)
+    except Exception as e:
+        print(f"⚠️ Caída a servidor HTTP por defecto: {e}")
+>>>>>>> 771b305 (feat: migrate dashboard HTTP server to Flask in DEBUG mode with hot reloading)
 
 
 _dashboard_server_thread = None
