@@ -39,7 +39,12 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Poker Bot Intelligence &amp; Analytics Control Center</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="/static/js/chart.umd.min.js"></script>
+    <script>
+        if (typeof Chart === 'undefined') {{
+            document.write('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"><\\/script>');
+        }}
+    </script>
     <style>
         :root {{
             --bg-main: #080c14;
@@ -2334,9 +2339,20 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
             }}
         }}
 
+        let isFetchingAnalytics = false;
         async function checkLiveUpdates() {{
+            if (isFetchingAnalytics) return;
             const badge = document.getElementById('liveSyncBadge');
             try {{
+                if (RAW_DATA.live_status && RAW_DATA.live_status.total_hands !== undefined) {{
+                    const th = RAW_DATA.live_status.total_hands;
+                    const td = RAW_DATA.live_status.total_decisions;
+                    if (th === lastHandsCount && td === lastDecisionsCount) {{
+                        return;
+                    }}
+                }}
+
+                isFetchingAnalytics = true;
                 const res = await fetch('/api/analytics', {{ cache: 'no-store' }});
                 if (!res.ok) throw new Error('Modo archivo estático');
                 const freshData = await res.json();
@@ -2367,6 +2383,8 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
                     badge.className = 'badge badge-blue';
                     badge.textContent = `📄 Vista Autónoma (${{lastHandsCount}}m | Auto-actualizable por bot.py)`;
                 }}
+            }} finally {{
+                isFetchingAnalytics = false;
             }}
         }}
 
@@ -2394,8 +2412,8 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
             initFilters();
             applyDashboardFilters();
             updateLiveMesaUI();
-            setInterval(updateLiveMesaUI, 300);
-            setInterval(checkLiveUpdates, 500);
+            setInterval(updateLiveMesaUI, 1200);
+            setInterval(checkLiveUpdates, 4000);
         }});
     </script>
 </body>
@@ -2554,8 +2572,21 @@ def imprimir_resumen_consola(db_path: Path = DB_PATH) -> None:
     print("=" * 96 + "\n")
 
 
+def obtener_recuentos_rapidos_db(db_path: Path = DB_PATH) -> Dict[str, int]:
+    try:
+        import sqlite3
+        with sqlite3.connect(db_path, timeout=1.0) as conn:
+            cur = conn.cursor()
+            nh = cur.execute("SELECT count(*) FROM analytics_hands").fetchone()[0]
+            nd = cur.execute("SELECT count(*) FROM analytics_decisions").fetchone()[0]
+            return {"total_hands": nh, "total_decisions": nd}
+    except Exception:
+        return {"total_hands": 0, "total_decisions": 0}
+
+
 def obtener_estado_live_dict() -> Dict[str, Any]:
     """Obtiene el estado dinámico en vivo del agente (cartas, pot, calle, eventos y perfil del rival)."""
+    counts = obtener_recuentos_rapidos_db()
     live_info: Dict[str, Any] = {
         "hand_number": 1,
         "current_street": "PREFLOP",
@@ -2569,6 +2600,8 @@ def obtener_estado_live_dict() -> Dict[str, Any]:
         "live_events": [],
         "paused": False,
         "active": False,
+        "total_hands": counts["total_hands"],
+        "total_decisions": counts["total_decisions"],
     }
     try:
         import bot
@@ -2589,6 +2622,8 @@ def obtener_estado_live_dict() -> Dict[str, Any]:
                 "live_events": [str(ev) for ev in list(getattr(tr, "live_events", []) or [])[-20:]],
                 "paused": getattr(bot, "bot_paused", False),
                 "active": True,
+                "total_hands": counts["total_hands"],
+                "total_decisions": counts["total_decisions"],
             }
     except Exception:
         pass
@@ -2613,13 +2648,28 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
+            elif parsed.path.startswith("/static/"):
+                rel_path = parsed.path.lstrip("/")
+                file_on_disk = Path(rel_path)
+                if file_on_disk.is_file():
+                    mime = "application/javascript" if rel_path.endswith(".js") else "application/octet-stream"
+                    self.send_response(200)
+                    self.send_header("Content-Type", mime)
+                    self.send_header("Content-Length", str(file_on_disk.stat().st_size))
+                    self.end_headers()
+                    return
+                self.send_error(404, "Archivo estático no encontrado")
             else:
                 super().do_HEAD()
 
         def do_GET(self):
             parsed = urllib.parse.urlparse(self.path)
             if parsed.path in ("/", "/index.html", "/dashboard"):
-                generar_dashboard_html(db_path=db_path, output_html=html_path, auto_seed_benchmark_if_empty=False)
+                import time
+                ahora = time.time()
+                if not html_path.exists() or (ahora - getattr(AnalyticsRequestHandler, "_last_html_gen", 0.0) > 10.0):
+                    generar_dashboard_html(db_path=db_path, output_html=html_path, auto_seed_benchmark_if_empty=False)
+                    AnalyticsRequestHandler._last_html_gen = ahora
                 content = html_path.read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2672,6 +2722,19 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+            elif parsed.path.startswith("/static/"):
+                rel_path = parsed.path.lstrip("/")
+                file_on_disk = Path(rel_path)
+                if file_on_disk.is_file():
+                    mime = "application/javascript" if rel_path.endswith(".js") else "application/octet-stream"
+                    raw = file_on_disk.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", mime)
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return
+                self.send_error(404, "Archivo estático no encontrado")
             else:
                 self.send_error(404, "Ruta no encontrada")
 
@@ -2748,8 +2811,8 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
         except Exception:
             pass
 
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("127.0.0.1", port), AnalyticsRequestHandler) as httpd:
+    http.server.ThreadingHTTPServer.allow_reuse_address = True
+    with http.server.ThreadingHTTPServer(("127.0.0.1", port), AnalyticsRequestHandler) as httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
