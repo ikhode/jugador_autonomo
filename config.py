@@ -13,13 +13,42 @@ GAME_PASSWORD = os.getenv("GAME_PASSWORD", "")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-ACTIVE_MODEL = os.getenv("ACTIVE_MODEL", "gemini-2.5-flash")  # "gemini-2.5-flash", "gemma-4b-local", "gto-heuristic"
-GEMMA_LOCAL_MODEL_PATH = os.getenv("GEMMA_LOCAL_MODEL_PATH", r"C:\Users\SATAP\.android\models\gemma-4-4b\gemma-4-E4B_q4_0-it.gguf")
+GEMINI_MODELS_PRIORITY = list(dict.fromkeys([
+    GEMINI_MODEL,
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-1.5-flash",
+]))
+ACTIVE_MODEL = os.getenv("ACTIVE_MODEL", GEMINI_MODEL)
+AVAILABLE_MODELS = list(dict.fromkeys([*GEMINI_MODELS_PRIORITY, "gemma-4b-local", "gto-heuristic"]))
+GEMMA_LOCAL_MODEL_PATH = os.getenv("GEMMA_LOCAL_MODEL_PATH", "")
 
-MODO = os.getenv("MODO", "gemini")  # "gemini" o "heuristico"
+MODO = os.getenv("MODO", "gemini").strip().lower()  # "determinista" | "hibrido" | "gemini"
+HYBRID_EV_DIFF_THRESHOLD_BB = float(os.getenv("HYBRID_EV_DIFF_THRESHOLD_BB", "0.5"))
+
+# Analítica honesta (Fase 5)
+MIN_LIVE_HANDS_FOR_IMPROVEMENT = int(os.getenv("MIN_LIVE_HANDS_FOR_IMPROVEMENT", "5000"))
+MIN_PAIRED_BENCHMARK_HANDS = int(os.getenv("MIN_PAIRED_BENCHMARK_HANDS", "30"))
+POWER_TARGET = float(os.getenv("POWER_TARGET", "0.80"))
+ALPHA_SIGNIFICANCE = float(os.getenv("ALPHA_SIGNIFICANCE", "0.05"))
+DEFAULT_TARGET_DELTA_BB100 = float(os.getenv("DEFAULT_TARGET_DELTA_BB100", "10.0"))
+
+
+def obtener_modo_activo() -> str:
+    """Normaliza MODO y ACTIVE_MODEL al esquema único: determinista | hibrido | gemini."""
+    if str(ACTIVE_MODEL or "").strip().lower() in ("gto-heuristic", "determinista", "heuristico"):
+        return "determinista"
+    m = str(MODO or "gemini").strip().lower()
+    if m in ("heuristico", "determinista", "gto"):
+        return "determinista"
+    if m in ("hibrido", "hybrid"):
+        return "hibrido"
+    return "gemini"
 USAR_CAPTURA = os.getenv("USAR_CAPTURA", "false").lower() == "true"
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 HOLD_BROWSER_OPEN = os.getenv("HOLD_BROWSER_OPEN", "true").lower() == "true"
+PLAY_MONEY_ONLY = os.getenv("PLAY_MONEY_ONLY", "true").lower() == "true"
 CDP_PORT = int(os.getenv("CDP_PORT", "9222"))
 SLOW_MO = int(os.getenv("SLOW_MO", "100"))
 
@@ -40,6 +69,13 @@ BIG_BLIND_DEFAULT = float(os.getenv("BIG_BLIND_DEFAULT", "20.0"))
 INITIAL_BANKROLL = float(os.getenv("INITIAL_BANKROLL", "1500.0"))
 ANALYTICS_ENABLED = os.getenv("ANALYTICS_ENABLED", "true").lower() == "true"
 
+# Parámetros del Motor GTO y Decisor por EV (Fase 2)
+PUSH_FOLD_MAX_BB = float(os.getenv("PUSH_FOLD_MAX_BB", "10.0"))
+MONTE_CARLO_ITERATIONS = int(os.getenv("MONTE_CARLO_ITERATIONS", "250"))
+SIZING_CBET_PCTS = (0.33, 0.66, 1.0)
+OPEN_RAISE_BB = float(os.getenv("OPEN_RAISE_BB", "2.2"))
+THREE_BET_MULTIPLIER = float(os.getenv("THREE_BET_MULTIPLIER", "3.0"))
+
 # Selectores CSS y de elementos en la mesa de póker
 SELECTORS = {
     "btn_acceder": "xpath=//*[@id=\"root\"]/nav/div/div[3]/button, #btn-login, button.btn-login, a.btn-login, .login-btn",
@@ -59,16 +95,16 @@ SELECTORS = {
     "btn_check": "#CHECK, button:has-text('Check'), button:has-text('Pasar'), .action-check, div#CHECK, div:has-text('Check'), div:has-text('Pasar')",
     "call": "#CALL, button:has-text('Call'), button:has-text('Igualar'), button:has-text('Pagar'), .action-call, div#CALL, div:has-text('Call'), div:has-text('Igualar'), div:has-text('Pagar'), [id*='CALL']",
     "btn_call": "#CALL, button:has-text('Call'), button:has-text('Igualar'), button:has-text('Pagar'), .action-call, div#CALL, div:has-text('Call'), div:has-text('Igualar'), div:has-text('Pagar'), [id*='CALL']",
-    "raise": "#RAISE, #BET, [id*='RAISE'], [id*='BET'], .action-raise, .action-bet, .raise-button, .bet-button, div#RAISE, div#BET, button:has-text('Raise'), div:has-text('Raise'), span:has-text('Raise'), button:has-text('Subir'), div:has-text('Subir'), span:has-text('Subir'), button:has-text('Bet'), div:has-text('Bet'), button:has-text('Apostar'), div:has-text('Apostar')",
-    "btn_raise": "#RAISE, #BET, [id*='RAISE'], [id*='BET'], .action-raise, .action-bet, .raise-button, .bet-button, div#RAISE, div#BET, button:has-text('Raise'), div:has-text('Raise'), span:has-text('Raise'), button:has-text('Subir'), div:has-text('Subir'), span:has-text('Subir'), button:has-text('Bet'), div:has-text('Bet'), button:has-text('Apostar'), div:has-text('Apostar')",
-    "allin": "#ALLIN, button:has-text('All-in'), button:has-text('Allin'), div:has-text('All-in'), div:has-text('Allin'), .action-allin, [id*='ALLIN']",
-    "btn_allin": "#ALLIN, button:has-text('All-in'), button:has-text('Allin'), div:has-text('All-in'), div:has-text('Allin'), .action-allin, [id*='ALLIN']",
+    "raise": "#RAISE, #BET, .action-raise, .action-bet, div#RAISE, div#BET, button:has-text('Raise'), button:has-text('Bet'), button:has-text('Subir'), button:has-text('Apostar')",
+    "btn_raise": "#RAISE, #BET, .action-raise, .action-bet, div#RAISE, div#BET, button:has-text('Raise'), button:has-text('Bet'), button:has-text('Subir'), button:has-text('Apostar')",
+    "allin": "#ALLIN, .actions-area button:has-text('All-in'), .actions-area button:has-text('Allin'), .actions-area [role='button']:has-text('All-in'), .actions-area [role='button']:has-text('Allin'), .actions-area .action-allin, .actions-area [id*='ALLIN']",
+    "btn_allin": "#ALLIN, .actions-area button:has-text('All-in'), .actions-area button:has-text('Allin'), .actions-area [role='button']:has-text('All-in'), .actions-area [role='button']:has-text('Allin'), .actions-area .action-allin, .actions-area [id*='ALLIN']",
     "raise_input": "input.betting-input, input[type='range'], input.raise-input",
     "btn_raise_input": "input.betting-input, input[type='range'], input.raise-input",
     "start": "button:has-text('Iniciar'), button:has-text('Start'), .btn-start",
     "btn_start": "button:has-text('Iniciar'), button:has-text('Start'), .btn-start",
-    "replay": "#general-popup-button-action-REPLAY, #general-popup-button-action-PLAY_AGAIN, button:has-text('Jugar de nuevo'), div:has-text('Jugar de nuevo'), span:has-text('Jugar de nuevo'), button:has-text('Replay'), .btn-replay",
-    "btn_replay": "#general-popup-button-action-REPLAY, #general-popup-button-action-PLAY_AGAIN, button:has-text('Jugar de nuevo'), div:has-text('Jugar de nuevo'), span:has-text('Jugar de nuevo'), button:has-text('Replay'), .btn-replay",
+    "replay": "#general-popup-button-action-REPLAY, #general-popup-button-action-PLAY_AGAIN, [role='dialog'] button:has-text('Jugar de nuevo'), [role='dialog'] [role='button']:has-text('Jugar de nuevo'), #general-popup button:has-text('Jugar de nuevo'), button:has-text('Jugar de nuevo'), button:has-text('Replay'), .btn-replay",
+    "btn_replay": "#general-popup-button-action-REPLAY, #general-popup-button-action-PLAY_AGAIN, [role='dialog'] button:has-text('Jugar de nuevo'), [role='dialog'] [role='button']:has-text('Jugar de nuevo'), #general-popup button:has-text('Jugar de nuevo'), button:has-text('Jugar de nuevo'), button:has-text('Replay'), .btn-replay",
     "btn_sitout": "#general-popup-button-action-OK, button:has-text('Aceptar Sit-out')",
     "game_over": ".game-over-modal, [data-result]",
 }
