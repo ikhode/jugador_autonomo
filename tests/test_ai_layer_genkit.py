@@ -274,3 +274,24 @@ def test_permission_denied_opens_circuit_and_error_message_is_traced():
     assert policy.available_models() == ["m_ok"]
     detalles = [s.detail for s in res.trace.steps if s.status == "ERROR"]
     assert any("PERMISSION_DENIED" in d and "does not have permission" in d for d in detalles)
+
+
+def test_bet_and_apostar_options_accepted_for_raise():
+    from ai_layer import build_table_input, validate_legality, PokerDecision
+
+    t_in = build_table_input({"opciones_disponibles": "CHECK | BET | ALL_IN", "es_mi_turno": True})
+    assert "BET" in t_in.opciones_legales
+    ok, dec, reason = validate_legality(PokerDecision.model_validate_json(_valid_json("RAISE")), t_in)
+    assert ok is True
+    assert dec.accion == "RAISE"
+    assert reason == "raise_as_bet"
+
+
+def test_json_cleaning_with_surrounding_text():
+    policy = ModelPolicy(models=["m1"])
+    wrapped_json = f"Hola, aquí está mi decisión:\n```json\n{_valid_json('CHECK')}\n```\nSaludos!"
+    layer = AILayer(policy=policy, model_callable=lambda _m, _c, _t: (wrapped_json, 10, 5), use_genkit=False)
+    res = layer.decidir(dom_data=_sample_dom("CHECK | BET", 0.0))
+    assert res.decision.accion == "CHECK"
+    assert res.trace.schema_valid is True
+    assert res.trace.fallback_reason == ""

@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
+import logging
 import random
 import re
 import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from google import genai
 from google.genai import types
@@ -26,7 +30,7 @@ except Exception:
 
 
 LEGAL_PLAY_ACTIONS = ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN")
-ALL_ACTIONS = ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN", "ALLIN", "REPLAY", "START_GAME", "WAIT")
+ALL_ACTIONS = ("FOLD", "CHECK", "CALL", "RAISE", "BET", "APOSTAR", "ALL_IN", "ALLIN", "REPLAY", "START_GAME", "WAIT")
 
 
 class PokerDecision(BaseModel):
@@ -348,8 +352,11 @@ def validate_legality(decision: PokerDecision, table_input: PokerTableInput) -> 
         return False, decision, f"illegal_passive_action:{acc}"
 
     if opts and acc not in opts:
-        if acc == "RAISE" and "BET" in opts:
+        if acc in ("RAISE", "BET") and any(b in opts for b in ("BET", "RAISE", "APOSTAR")):
             return True, decision, "raise_as_bet"
+        if acc == "CALL" and "CHECK" in opts and table_input.a_igualar_bb <= 0:
+            decision.accion = "CHECK"
+            return True, decision, "call_converted_to_check"
         return False, decision, f"action_not_in_legal_options:{acc}"
 
     return True, decision, ""
@@ -360,6 +367,10 @@ def _sanitizar_json_decision(raw_text: str) -> str:
     clean = re.sub(r"```(?:json)?", "", raw_text, flags=re.I).replace("```", "").strip()
     if "<think>" in clean and "</think>" in clean:
         clean = clean.split("</think>")[-1].strip()
+    if not clean.startswith("{"):
+        m = re.search(r"\{.*\}", clean, flags=re.S)
+        if m:
+            clean = m.group(0).strip()
     try:
         data = json.loads(clean)
         if isinstance(data, dict):
@@ -644,7 +655,8 @@ class AILayer:
                         self.policy.record_success(model_name)
                         break
                     except Exception as ve:
-                        last_reason = f"schema_error:{type(ve).__name__}"
+                        ve_msg = re.sub(r"\s+", " ", str(ve))[:180]
+                        last_reason = f"schema_error:{type(ve).__name__} | {ve_msg}"
                         trace.steps.append(
                             StepTrace(
                                 step="schema_validation",

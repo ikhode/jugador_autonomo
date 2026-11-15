@@ -13,8 +13,8 @@
 ### Modificado
 - `poker_agent.py`: convertido en adaptador compatible hacia atrás sobre `ai_layer.AILayer`.
 - `bot.py` y `analytics_logger.py`: propagación de `decision_uid` y `ai_trace` + registro explícito de `fallback_reason`.
-- `config.py`: actualizado `AI_HTTP_TIMEOUT_MS = 12000` (la API de Google GenAI rechaza HTTP deadlines < 10 s con error 400); fijado modelo prioritario a `gemini-3.1-flash-lite`.
-- `ai_layer.py`: añadido soporte para clasificar `DEADLINE_TOO_SHORT` (400), `PERMISSION_DENIED` (403) y `TIMEOUT` (504), abriendo circuito en caso de fallo de permisos/configuración y guardando el mensaje de error completo en `StepTrace.detail`.
+- `config.py`: actualizado `AI_HTTP_TIMEOUT_MS = 15000` (la API de Google GenAI rechaza HTTP deadlines < 10 s con error 400); fijado modelo prioritario a `gemini-3.1-flash-lite`.
+- `ai_layer.py`: añadido soporte para clasificar `DEADLINE_TOO_SHORT` (400), `PERMISSION_DENIED` (403) y `TIMEOUT` (504); corregidos imports de `concurrent.futures` y `logging`; añadido `"BET"` y `"APOSTAR"` a `ALL_ACTIONS` y mapeo a legalidad `RAISE` (`raise_as_bet`); extracción tolerante de JSON envuelto en bloques de código o prosa; guardado el mensaje de error completo en `StepTrace.detail`.
 - `.env`: fijado `GEMINI_MODEL=gemini-3.1-flash-lite`.
 - `config.py`, `requirements.txt`, `README.md`, `DOCUMENTACION_ANALITICAS.md`.
 
