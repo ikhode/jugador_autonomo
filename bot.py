@@ -606,8 +606,22 @@ def validar_accion(accion: str, monto: Any, estado_dom: Optional[dict]) -> Tuple
     if accion_norm in ("WAIT", "START_GAME", "REPLAY"):
         return accion_norm, 0, None
 
+    modo_allin_or_fold = hay_allin and hay_fold and not hay_call and not hay_check and not hay_raise
+
     # Si hay botones visibles, validar estrictamente la legalidad
     if botones:
+        if modo_allin_or_fold:
+            if accion_norm in ("CALL", "RAISE", "ALL_IN"):
+                return "ALL_IN", 0, "Modo All-in o Fold -> ALL_IN"
+            if accion_norm == "FOLD":
+                return "FOLD", 0, None
+            if accion_norm == "CHECK":
+                tier_pre = (dom.get("gto_preflop") or {}).get("tier", "DESCONOCIDO")
+                gto_comb = dom.get("gto_combinacion") or {}
+                if tier_pre in ("S", "A", "B") or bool(gto_comb.get("es_pareja_en_mano")) or bool(gto_comb.get("coincidencias_mesa")):
+                    return "ALL_IN", 0, "Modo All-in o Fold con mano jugable -> ALL_IN"
+                return "FOLD", 0, "Modo All-in o Fold con mano débil -> FOLD"
+
         if accion_norm == "FOLD":
             if hay_check and a_igualar <= 0:
                 return "CHECK", 0, "FOLD innecesario con CHECK gratis -> CHECK"
@@ -617,8 +631,6 @@ def validar_accion(accion: str, monto: Any, estado_dom: Optional[dict]) -> Tuple
                 return "CHECK", 0, "FOLD no disponible -> CHECK"
             if hay_call:
                 return "CALL", 0, "FOLD no disponible -> CALL"
-            if hay_allin:
-                return "ALL_IN", 0, "FOLD no disponible -> ALL_IN"
             return "WAIT", 0, "FOLD sin botones legales -> WAIT"
 
         if accion_norm == "CHECK":
@@ -626,10 +638,10 @@ def validar_accion(accion: str, monto: Any, estado_dom: Optional[dict]) -> Tuple
                 return "CHECK", 0, None
             if hay_call:
                 return "CALL", 0, "CHECK ilegal con apuesta activa -> CALL"
-            if hay_allin:
-                return "ALL_IN", 0, "CHECK ilegal -> ALL_IN"
             if hay_fold:
                 return "FOLD", 0, "CHECK ilegal -> FOLD"
+            if hay_allin:
+                return "ALL_IN", 0, "CHECK ilegal -> ALL_IN"
             return "WAIT", 0, "CHECK sin botones legales -> WAIT"
 
         if accion_norm == "CALL":
@@ -1500,6 +1512,42 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
     hay_call = 'CALL' in botones
     hay_bet = 'BET' in botones or 'RAISE' in botones
     hay_allin = 'ALL_IN' in botones or 'ALLIN' in botones
+
+    modo_allin_or_fold = (hay_allin or 'ALL_IN' in botones or 'ALLIN' in botones) and ('FOLD' in botones) and not hay_check and not hay_call and not hay_bet
+    desc_mano = (gto_comb.get('categoria') if not es_preflop and gto_comb.get('categoria') != 'CARTA ALTA PRIVADA' else None) or fuerza or gto_pre.get('mano_code') or cartas
+
+    if modo_allin_or_fold:
+        if es_preflop:
+            es_jugable_ao_f = tier in ('S', 'A', 'B') or bool(gto_comb.get('es_pareja_en_mano'))
+        else:
+            es_jugable_ao_f = bool(
+                gto_comb.get('es_pareja_en_mano')
+                or gto_comb.get('coincidencias_mesa')
+                or gto_comb.get('es_proyecto_color')
+                or gto_comb.get('es_proyecto_escalera')
+                or gto_comb.get('es_color')
+                or gto_comb.get('es_escalera')
+            )
+        if es_jugable_ao_f:
+            return PokerDecision(
+                evaluacion=f"⚡ [Modo All-in or Fold] Mano jugable [{tier}] ({desc_mano}). Push All-in directo.",
+                estrategia_competitiva="Empujar All-in en modalidad exclusiva All-in o Fold",
+                estado_pantalla="EN_MESA_JUEGO",
+                es_mi_turno=True,
+                accion="ALL_IN",
+                monto_apuesta=0,
+                confianza=0.95,
+            )
+        else:
+            return PokerDecision(
+                evaluacion=f"⚡ [Modo All-in or Fold] Mano débil [{tier}] ({desc_mano}). Fold disciplinado.",
+                estrategia_competitiva="Fold disciplinado en modalidad exclusiva All-in o Fold",
+                estado_pantalla="EN_MESA_JUEGO",
+                es_mi_turno=True,
+                accion="FOLD",
+                monto_apuesta=0,
+                confianza=0.92,
+            )
 
     # 0. Régimen Nash Push/Fold real <= PUSH_FOLD_MAX_BB (10 BB) en Preflop
     if es_preflop and stack_efectivo_bb > 0 and stack_efectivo_bb <= float(getattr(config, 'PUSH_FOLD_MAX_BB', 10.0)):

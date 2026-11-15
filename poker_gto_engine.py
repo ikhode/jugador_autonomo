@@ -632,15 +632,16 @@ def calcular_pot_odds_y_sizing(
     big_blind: Optional[float] = None,
     stack_rival_str: Any = None,
 ) -> Dict[str, Any]:
-    """Calcula pot odds, stack efectivo en BB y sizings proporcionales al bote en BB/fichas."""
-    bb = float(big_blind or getattr(config, "BIG_BLIND_DEFAULT", 20.0) or 20.0)
-    if bb <= 0:
-        bb = 20.0
-
+    """Calcula pot odds, stack efectivo en BB y sizings proporcionales al bote en BB/fichas (soporta floats y micro-apuestas)."""
     bote = _limpiar_num(bote_str)
     a_igualar = _limpiar_num(a_igualar_str)
     mi_stack = _limpiar_num(mi_stack_str)
     stack_rival = _limpiar_num(stack_rival_str) if stack_rival_str is not None else 0.0
+
+    bb = float(big_blind or getattr(config, "BIG_BLIND_DEFAULT", 20.0) or 20.0)
+    # Auto-detección para partidas de micro-límites / dinero real (ej. €0.02 / €0.05)
+    if (bb == 20.0 and bote > 0 and bote < 5.0) or bb <= 0:
+        bb = 0.02 if (bote > 0 and bote <= 0.50) else (0.10 if bote <= 2.0 else 0.50)
 
     pot_odds_pct = 0.0
     if a_igualar > 0 and (bote + a_igualar) > 0:
@@ -656,18 +657,30 @@ def calcular_pot_odds_y_sizing(
 
     pcts = getattr(config, "SIZING_CBET_PCTS", (0.33, 0.66, 1.0))
     bote_ref = max(bote, bb)
-    cbet_33 = max(int(round(bb)), int(round(bote_ref * pcts[0])))
-    cbet_66 = max(int(round(bb)), int(round(bote_ref * pcts[1])))
-    cbet_pot = max(int(round(bb)), int(round(bote_ref * pcts[2])))
+    es_micro_float = (bote > 0 and bote < 50.0) or (mi_stack > 0 and mi_stack < 50.0) or isinstance(bote_str, float) or isinstance(a_igualar_str, float)
+    if es_micro_float:
+        cbet_33 = round(max(bb, bote_ref * pcts[0]), 2)
+        cbet_66 = round(max(bb, bote_ref * pcts[1]), 2)
+        cbet_pot = round(max(bb, bote_ref * pcts[2]), 2)
+        bote_out = round(bote, 2)
+        a_igualar_out = round(a_igualar, 2)
+        mi_stack_out = round(mi_stack, 2)
+    else:
+        cbet_33 = max(int(round(bb)), int(round(bote_ref * pcts[0])))
+        cbet_66 = max(int(round(bb)), int(round(bote_ref * pcts[1])))
+        cbet_pot = max(int(round(bb)), int(round(bote_ref * pcts[2])))
+        bote_out = int(round(bote))
+        a_igualar_out = int(round(a_igualar))
+        mi_stack_out = int(round(mi_stack))
 
     return {
         "big_blind": bb,
-        "bote": int(round(bote)),
+        "bote": bote_out,
         "bote_bb": bote_bb,
-        "a_igualar": int(round(a_igualar)),
+        "a_igualar": a_igualar_out,
         "a_igualar_bb": a_igualar_bb,
         "pot_odds_pct": pot_odds_pct,
-        "mi_stack": int(round(mi_stack)),
+        "mi_stack": mi_stack_out,
         "mi_stack_bb": mi_stack_bb,
         "stack_efectivo_bb": stack_efectivo_bb,
         "sizing_cbet_pequeno": cbet_33,
