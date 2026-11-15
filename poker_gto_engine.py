@@ -899,6 +899,20 @@ def decidir_por_ev(dom_data: dict, seed: Optional[int] = None) -> Dict[str, Any]
         )
         evs["ALL_IN"] = round(ev_allin, 3)
 
+    # Control de bote: si CHECK es gratis y la mano es de valor marginal (equidad 0.30 a 0.62 sin pareja ni proyecto fuerte),
+    # priorizar CHECK sobre RAISE para evitar convertir una mano con valor de showdown en farol ineficiente.
+    gto_comb = dom.get("gto_combinacion") or {}
+    cat_str = str(gto_comb.get("categoria", "")).upper()
+    es_pareja_o_mejor = bool(
+        gto_comb.get("es_pareja_en_mano")
+        or any(k in cat_str for k in ("PAREJA", "TRIO", "COLOR", "ESCALERA", "FULL", "POKER"))
+    )
+    tiene_proyecto = bool(gto_comb.get("proyectos"))
+
+    if "CHECK" in evs and "RAISE" in evs and a_igualar_bb <= 0:
+        if 0.30 <= equidad < 0.62 and not es_pareja_o_mejor and not tiene_proyecto:
+            evs["RAISE"] = round(evs["CHECK"] - 0.10, 3)
+
     if not evs:
         return {"accion": "WAIT", "monto": 0, "ev_bb": 0.0, "equidad": equidad, "evs": {}, "razon": "Sin acciones legales"}
 

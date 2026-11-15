@@ -515,11 +515,10 @@ class AILayer:
 
         if str(model_name).startswith("cf-") or "llama" in str(model_name) or "deepseek" in str(model_name):
             try:
-                cf_timeout = min(11.0, timeout_sec)
+                cf_timeout = min(2.5, timeout_sec)
                 return self._invoke_cloudflare_ai(model_name, contents, cf_timeout)
             except Exception as e:
                 logger.warning("Error invocando Cloudflare Workers AI (%s): %s", model_name, e)
-                raise
                 raise
 
         assert self._client is not None
@@ -531,8 +530,8 @@ class AILayer:
         if hasattr(types, "ThinkingConfig"):
             gen_config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
 
-        # Timeout acotado por llamada a 6.0s para conmutar a Cloudflare Workers AI si Gemini tarda
-        call_timeout = min(6.0, max(1.5, timeout_sec)) if timeout_sec > 1.5 else timeout_sec
+        # Timeout acotado por llamada a 3.0s para conmutar inmediatamente si Gemini tarda
+        call_timeout = min(3.0, max(1.0, timeout_sec)) if timeout_sec > 1.0 else timeout_sec
 
         def _do_gemini_call():
             return self._client.models.generate_content(
@@ -575,7 +574,7 @@ class AILayer:
     ) -> AIDecisionResult:
         """Ejecuta el flujo instrumentado decidir_accion y garantiza respuesta segura."""
         t_start = time.perf_counter()
-        budget_sec = float(timeout_sec or getattr(config, "AI_DECISION_TIMEOUT_SEC", 13.0))
+        budget_sec = float(timeout_sec or getattr(config, "AI_DECISION_TIMEOUT_SEC", 3.5))
         deadline = t_start + budget_sec
         uid = decision_uid or uuid.uuid4().hex[:24]
 

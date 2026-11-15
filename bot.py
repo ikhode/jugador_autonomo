@@ -940,14 +940,17 @@ def actualizar_dom_data_conservando_contexto(
     if tracker_obj is not None:
         dom_data["historial_mano"] = tracker_obj.obtener_contexto_completo()
         mis_cartas = dom_data.get("mis_cartas", "") or " ".join(getattr(tracker_obj, "my_cards", []) or [])
-        if getattr(tracker_obj, "current_street", "PREFLOP") == "PREFLOP":
+        es_preflop = (
+            getattr(tracker_obj, "current_street", "PREFLOP") == "PREFLOP"
+            or getattr(tracker_obj, "current_round_no", 1) <= 1
+        )
+        if es_preflop:
             comunitarias = ""
+            dom_data["cartas_comunitarias"] = ""
             if hasattr(tracker_obj, "community_cards"):
                 tracker_obj.community_cards.clear()
         else:
             comunitarias = dom_data.get("cartas_comunitarias", "") or " ".join(getattr(tracker_obj, "community_cards", []) or [])
-        if comunitarias and getattr(tracker_obj, "current_street", "PREFLOP") == "PREFLOP":
-            tracker_obj.current_street = "POSTFLOP"
         bote = dom_data.get("bote", "") or getattr(tracker_obj, "last_pot", 0) or 0
     else:
         mis_cartas = dom_data.get("mis_cartas", "")
@@ -1469,6 +1472,38 @@ def salir_de_mesa_vacia_o_finalizada(target_mesa, page, context) -> bool:
         print(f"ℹ️ Nota al salir de mesa vacía: {e}")
     return False
 
+import random
+
+def aplicar_delay_humanizado(accion: str, dom_data: Optional[dict] = None) -> float:
+    """
+    Aplica una pausa aleatoria realista (jitter) antes de hacer clic en el DOM
+    para simular tiempo de reflexión humano y evitar patrones robóticos.
+    """
+    dom = dom_data or {}
+    street = (dom.get("gto_preflop") or {}).get("situacion") or str(dom.get("street") or "PREFLOP")
+    tier = (dom.get("gto_preflop") or {}).get("tier", "DESCONOCIDO")
+
+    if accion == "FOLD":
+        if tier in ("BASURA", "C"):
+            delay = random.uniform(0.4, 0.8)
+        else:
+            delay = random.uniform(0.9, 1.6)
+    elif accion in ("CHECK", "CALL"):
+        if street == "PREFLOP":
+            delay = random.uniform(0.6, 1.2)
+        else:
+            delay = random.uniform(1.1, 2.0)
+    elif accion in ("RAISE", "BET", "ALL_IN", "ALLIN"):
+        if tier in ("S", "A"):
+            delay = random.uniform(1.2, 2.4)
+        else:
+            delay = random.uniform(1.8, 3.2)
+    else:
+        delay = random.uniform(0.4, 0.8)
+
+    time.sleep(delay)
+    return delay
+
 def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
     target_url = ""
     try:
@@ -1492,10 +1527,16 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
     print(f"⚡ [ACCION IA]: {accion} | Estado: [{decision.estado_pantalla}] | Evaluacion: {decision.evaluacion}")
     tracker.hero_just_acted_ts = time.time()
 
+    # Humanizar tiempos de respuesta (pausa realista pre-clic)
+    if accion in ("FOLD", "CHECK", "CALL", "RAISE", "BET", "ALL_IN", "ALLIN"):
+        delay_sec = aplicar_delay_humanizado(accion, dom_data=dom_data)
+        print(f"🧠 [HUMAN TIMING] Pausa de reflexión: {delay_sec:.2f}s")
+
     btn_fold = config.SELECTORS.get("btn_fold", config.SELECTORS["fold"])
     btn_check = config.SELECTORS.get("btn_check", config.SELECTORS["check"])
     btn_call = config.SELECTORS.get("btn_call", config.SELECTORS["call"])
-    btn_raise = config.SELECTORS.get("btn_raise", config.SELECTORS["raise"])
+    btn_raise_base = config.SELECTORS.get("btn_raise", config.SELECTORS["raise"])
+    btn_raise = f"{btn_raise_base}, #BET, #RAISE, .action-raise, .action-bet, button:has-text('Raise'), button:has-text('Bet'), button:has-text('Subir'), button:has-text('Apostar'), div#RAISE, div#BET"
     btn_allin = config.SELECTORS.get("btn_allin", config.SELECTORS["allin"])
     btn_replay = config.SELECTORS.get("btn_replay", config.SELECTORS["replay"])
     raise_input_sel = config.SELECTORS.get("raise_input", "input.betting-input")
