@@ -113,6 +113,12 @@ def classify_error(err: Exception) -> str:
     """Clasifica errores del proveedor LLM en categorías accionables."""
     msg = str(err or "")
     low = msg.lower()
+    if "deadline" in low and "too short" in low:
+        return "DEADLINE_TOO_SHORT"
+    if "403" in msg or "permission_denied" in low or "does not have permission" in low:
+        return "PERMISSION_DENIED"
+    if "504" in msg or "deadline_exceeded" in low:
+        return "TIMEOUT"
     if "404" in msg or "not_found" in low or "not found" in low:
         return "NOT_FOUND_404"
     if "perday" in low or "per day" in low or "daily" in low:
@@ -162,7 +168,7 @@ class ModelPolicy:
         st = self._circuits.setdefault(model, _CircuitState())
         st.consecutive_failures += 1
         st.last_error_kind = err_kind
-        if err_kind == "NOT_FOUND_404":
+        if err_kind in ("NOT_FOUND_404", "PERMISSION_DENIED", "DEADLINE_TOO_SHORT"):
             st.open_until = t + self.cooldown_404_sec
         elif err_kind == "DAILY_QUOTA":
             st.open_until = t + self.cooldown_daily_sec
@@ -616,7 +622,10 @@ class AILayer:
                     call_ms = round((time.perf_counter() - call_t0) * 1000.0, 2)
                     kind = classify_error(exc)
                     last_reason = f"{kind}:{type(exc).__name__}"
-                    trace.steps.append(StepTrace(step="model_call", duration_ms=call_ms, status="ERROR", detail=last_reason))
+                    err_msg = re.sub(r"\s+", " ", str(exc))[:220]
+                    trace.steps.append(
+                        StepTrace(step="model_call", duration_ms=call_ms, status="ERROR", detail=f"{model_name} {last_reason} | {err_msg}")
+                    )
                     if kind == "RATE_LIMIT_429_503" and rate_tries < max_rate_attempts:
                         backoff = self.policy.compute_backoff_sec(rate_tries, base_ms=base_ms)
                         if (deadline - time.perf_counter()) > backoff + 0.1:

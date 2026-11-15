@@ -245,3 +245,32 @@ def test_offline_eval_reproducible_and_passes_gate():
     assert r1["metrics"]["coherence_rate"] == 1.0
     ok, _ = compare_with_baseline(r1, r2)
     assert ok is True
+
+
+def test_classify_error_new_kinds_and_http_timeout_config():
+    from ai_layer import classify_error
+
+    assert classify_error(RuntimeError("400 INVALID_ARGUMENT. Manually set deadline 4s is too short. Minimum allowed deadline is 10s.")) == "DEADLINE_TOO_SHORT"
+    assert classify_error(RuntimeError("403 PERMISSION_DENIED. The caller does not have permission")) == "PERMISSION_DENIED"
+    assert classify_error(RuntimeError("504 DEADLINE_EXCEEDED. Deadline expired")) == "TIMEOUT"
+    # La API rechaza plazos < 10 s: el timeout HTTP configurado debe respetarlo.
+    assert config.AI_HTTP_TIMEOUT_MS >= 10000
+    assert config.AI_DECISION_TIMEOUT_SEC * 1000 < config.AI_HTTP_TIMEOUT_MS
+
+
+def test_permission_denied_opens_circuit_and_error_message_is_traced():
+    seen = []
+
+    def fn(model, _c, _t):
+        seen.append(model)
+        if model == "m_403":
+            raise RuntimeError("403 PERMISSION_DENIED. The caller does not have permission")
+        return _valid_json("CHECK"), 10, 5
+
+    policy = ModelPolicy(models=["m_403", "m_ok"])
+    layer = AILayer(policy=policy, model_callable=fn, use_genkit=False, sleep_fn=lambda _: None)
+    res = layer.decidir(dom_data=_sample_dom("CHECK | BET", 0.0))
+    assert res.trace.model_used == "m_ok"
+    assert policy.available_models() == ["m_ok"]
+    detalles = [s.detail for s in res.trace.steps if s.status == "ERROR"]
+    assert any("PERMISSION_DENIED" in d and "does not have permission" in d for d in detalles)

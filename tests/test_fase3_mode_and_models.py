@@ -15,7 +15,7 @@ from poker_agent import PokerDecision, optimizar_imagen, validar_ruta_gemma_loca
 
 class TestFase3ModeAndModels(unittest.TestCase):
     def test_01_modo_unificado_y_modelos_centralizados(self):
-        self.assertTrue(len(config.GEMINI_MODELS_PRIORITY) >= 3)
+        self.assertTrue(len(config.GEMINI_MODELS_PRIORITY) >= 1)
         self.assertEqual(config.GEMINI_MODELS_PRIORITY[0], config.GEMINI_MODEL)
         self.assertNotIn("C:\\Users\\SATAP", config.GEMMA_LOCAL_MODEL_PATH)
 

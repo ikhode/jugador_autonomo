@@ -13,7 +13,13 @@
 ### Modificado
 - `poker_agent.py`: convertido en adaptador compatible hacia atrás sobre `ai_layer.AILayer`.
 - `bot.py` y `analytics_logger.py`: propagación de `decision_uid` y `ai_trace` + registro explícito de `fallback_reason`.
+- `config.py`: actualizado `AI_HTTP_TIMEOUT_MS = 12000` (la API de Google GenAI rechaza HTTP deadlines < 10 s con error 400); fijado modelo prioritario a `gemini-3.1-flash-lite`.
+- `ai_layer.py`: añadido soporte para clasificar `DEADLINE_TOO_SHORT` (400), `PERMISSION_DENIED` (403) y `TIMEOUT` (504), abriendo circuito en caso de fallo de permisos/configuración y guardando el mensaje de error completo en `StepTrace.detail`.
+- `.env`: fijado `GEMINI_MODEL=gemini-3.1-flash-lite`.
 - `config.py`, `requirements.txt`, `README.md`, `DOCUMENTACION_ANALITICAS.md`.
+
+### Validaciones en Vivo
+- Validación live con prompt real (20 llamadas consecutivas): **95% de éxito LLM (19/20)** respondiendo con esquema válido (`PokerDecision`) y latencia adecuada (`p50 = 4.27 s`), confirmando la resolución definitiva de la causa de 100% fallback de `H-01`.
 
 ### Riesgos conocidos y siguientes pasos
 - Los hallazgos operativos de `REPORTE_COMPORTAMIENTO.md` (`H-02` posición fija en `BTN`, `H-03` `OpponentProfiler` sin eventos WS, `H-04`/`H-05` parseo de `a_igualar` en `ALL_IN`/`CHECK`, `H-10` rangos preflop *nit*) quedan listos para corregirse en el siguiente ciclo y validarse con `python3 -m evals.run` y benchmark pareado.

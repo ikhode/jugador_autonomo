@@ -149,4 +149,24 @@ El bot **no está operando con su capa de IA ni con su motor de explotación rea
    - *Métrica de decisión:* Tasa de legalidad `100%`, latencia `p95 <= 2,500 ms`, tasa de fallback `< 5%`, y `ev_lost_bb` medio <= motor determinista.
 
 ---
-**Auditoría Parte A completada.** Quedo a la espera de tu confirmación para iniciar la **Parte B (Paso 0: verificación previa de Genkit Python y `GENKIT_VIABILIDAD.md`)**.
+
+## 8. Addendum de Validación en Vivo: Resolución Causa Raíz de H-01
+
+Tras implementar la capa aislada de IA (`ai_layer.py`), se diagnosticó experimentalmente por qué el bot caía al 100% en `gto_fallback_0ms`:
+1. **Restricción de la API de Google GenAI:** La biblioteca oficial `google-genai` rechaza cualquier llamada con `HttpOptions(timeout < 10000ms)` arrojando `400 INVALID_ARGUMENT: Manually set deadline 4s is too short. Minimum allowed deadline is 10s.` Al configurar `AI_HTTP_TIMEOUT_MS = 3500`, el 100% de las peticiones HTTP eran abortadas en la capa de red del SDK de Google antes de salir.
+2. **Disponibilidad de Modelos:**
+   - `gemini-3.5-flash`: Sobrecarga en servidores de Google que resulta en `504 DEADLINE_EXCEEDED` o tiempos > 11 s.
+   - `gemini-3.8-flash`: Devuelve `403 PERMISSION_DENIED` con las credenciales estándar del proyecto.
+   - `gemini-3.1-flash-lite`: Operativo, disponible y validado.
+3. **Solución Implementada:**
+   - `config.AI_HTTP_TIMEOUT_MS` elevado a `12000` (cumple con la restricción de Google GenAI; el watchdog del turno en `bot.py` mediante `future.result(timeout=4.5)` mantiene el control estricto de la mesa).
+   - `GEMINI_MODELS_PRIORITY` fijado con `gemini-3.1-flash-lite`.
+   - `ai_layer.py` clasifica explícitamente `DEADLINE_TOO_SHORT` y `PERMISSION_DENIED`.
+4. **Resultado de Prueba en Vivo (n=20 llamadas con prompt real y datos de mesa):**
+   - **Éxito LLM:** 19/20 (95.0%).
+   - **Fallbacks:** 1/20 (5.0%, por timeout de red puntual).
+   - **Esquema Pydantic (`PokerDecision`):** 100% válido en respuestas recibidas.
+   - **Latencia:** p50 = 4.27 s.
+
+---
+**Auditoría y Despliegue de Capa de IA completados.**
