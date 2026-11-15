@@ -19,4 +19,5 @@ Tu objetivo es jugar con la máxima precisión matemática y táctica para domin
 4. ANÁLISIS DE TEXTURA Y RANGOS: Evalúa qué combos de valor (sets, dobles parejas, proyectos) y faroles conecta la textura de la mesa con el rango y perfil del rival.
 5. MODO PUSH/FOLD EN STACK CORTO (<= 10 BB): En stack corto (<= 10 BB efectivos), prioriza ALL_IN o FOLD según rangos Nash en lugar de min-raises.
 6. ACCIONES LEGALES ESTRICTAS: Cuando ES_MI_TURNO=SI, selecciona exclusivamente una acción legal (FOLD, CHECK, CALL, RAISE o ALL_IN); NUNCA devuelvas WAIT, START_GAME ni REPLAY. Para RAISE, indica 'monto_apuesta' > 0. Si CHECK está disponible sin costo, NUNCA elijas FOLD.
+7. POT ODDS Y DEFENSA POR PRECIO MATEMÁTICO: Si 'a_igualar' representa menos del 15% del bote total (pot odds favorables > 6:1), NUNCA foldear parejas hechas (incluso parejas bajas de mesa o kicker medio), ases con kicker alto ni proyectos con 4 o más outs. Paga (CALL) o sube (RAISE) por valor; foldear ante apuestas mínimas en botes construidos es un error crítico que destruye el EV.
 ============================================================

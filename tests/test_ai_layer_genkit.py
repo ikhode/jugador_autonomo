@@ -295,3 +295,28 @@ def test_json_cleaning_with_surrounding_text():
     assert res.decision.accion == "CHECK"
     assert res.trace.schema_valid is True
     assert res.trace.fallback_reason == ""
+
+
+def test_all_in_variations_tokenization_and_legality():
+    from ai_layer import build_table_input, validate_legality, PokerDecision
+
+    for variant in ["FOLD | ALL IN", "FOLD, ALL IN", "FOLD ALL-IN", "FOLD | ALLIN", "FOLD | ALL_IN"]:
+        t_in = build_table_input({"opciones_disponibles": variant, "es_mi_turno": True})
+        assert "ALL_IN" in t_in.opciones_legales, f"Fallo al normalizar {variant}"
+        for act in ["ALL_IN", "ALLIN"]:
+            dec_raw = _valid_json(act)
+            ok, dec, _ = validate_legality(PokerDecision.model_validate_json(dec_raw), t_in)
+            assert ok is True, f"Fallo validando {act} con {variant}"
+            assert dec.accion == "ALL_IN"
+
+
+def test_unauthorized_401_classification_and_circuit_breaker():
+    from ai_layer import classify_error
+
+    err_401 = RuntimeError("HTTP Error 401: Unauthorized")
+    assert classify_error(err_401) == "UNAUTHORIZED"
+
+    policy = ModelPolicy(models=["cf-bad", "gemini-ok"])
+    policy.record_failure("cf-bad", "UNAUTHORIZED", now=100.0)
+    assert "cf-bad" not in policy.available_models(now=105.0)
+    assert policy.available_models(now=105.0) == ["gemini-ok"]
