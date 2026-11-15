@@ -1716,8 +1716,8 @@ def decidir_accion_local(dom_data: dict) -> PokerDecision:
 
     game_state_mgr, decision_maker = get_local_decision_maker()
 
-    pot = float(dom_data.get('bote', 0) or 0.0)
-    current_bet = float(dom_data.get('a_igualar', 0) or 0.0)
+    pot = _parse_num_dom(dom_data.get('bote'), 0.0)
+    current_bet = _parse_num_dom(dom_data.get('a_igualar'), 0.0)
     comunitarias_str = (dom_data.get('cartas_comunitarias') or '').strip()
     board_cards_count = len(comunitarias_str.split()) if comunitarias_str else 0
 
