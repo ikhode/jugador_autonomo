@@ -2635,6 +2635,19 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+            elif parsed.path == "/api/bot/model":
+                import config
+                resp = {
+                    "active_model": getattr(config, "ACTIVE_MODEL", "gemini-3.1-flash-lite"),
+                    "available_models": ["gemini-3.1-flash-lite", "gemma-4b-local", "gto-heuristic"]
+                }
+                body = json.dumps(resp, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             else:
                 self.send_error(404, "Ruta no encontrada")
 
@@ -2661,6 +2674,39 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(response_data)))
+                self.end_headers()
+                self.wfile.write(response_data)
+            elif parsed.path == "/api/bot/model":
+                import config
+                content_len = int(self.headers.get('Content-Length', 0))
+                body_data = {}
+                if content_len > 0:
+                    raw = self.rfile.read(content_len)
+                    try:
+                        body_data = json.loads(raw.decode('utf-8'))
+                    except Exception:
+                        pass
+                new_mod = body_data.get("model") or "gemini-3.1-flash-lite"
+                config.ACTIVE_MODEL = new_mod
+
+                if new_mod == "gemma-4b-local":
+                    try:
+                        import threading
+                        from poker_agent import precargar_gemma_local
+                        threading.Thread(target=precargar_gemma_local, daemon=True).start()
+                    except Exception as e:
+                        print(f"⚠️ Error precargando Gemma local: {e}")
+
+                response_data = json.dumps({
+                    "status": "OK",
+                    "message": f"Modelo cambiado a {new_mod} {'(Precargando pesos GGUF en segundo plano)' if new_mod == 'gemma-4b-local' else ''}",
+                    "active_model": config.ACTIVE_MODEL
+                }, ensure_ascii=False).encode("utf-8")
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                 self.send_header("Content-Length", str(len(response_data)))
                 self.end_headers()
                 self.wfile.write(response_data)
