@@ -1383,9 +1383,21 @@ def main():
                     else:
                         time.sleep(0.05)
 
+                except KeyboardInterrupt:
+                    raise
                 except Exception as e:
                     print(f"ℹ️ Nota de autorrecuperación en el bucle: {e}")
                     time.sleep(0.5)
+
+            except KeyboardInterrupt:
+                print("\n🛑 Bot detenido por el usuario (Ctrl + C).")
+                if getattr(config, "HOLD_BROWSER_OPEN", True):
+                    print("📌 NAVEGADOR MANTENIDO ABIERTO. Puedes seguir navegando o jugando manualmente.")
+                    print("Presiona Enter en esta terminal cuando desees cerrar la ventana del navegador...")
+                    try:
+                        input()
+                    except Exception:
+                        pass
 
     finally:
         if analytics_logger is not None:

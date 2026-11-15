@@ -19,6 +19,7 @@ GEMMA_LOCAL_MODEL_PATH = os.getenv("GEMMA_LOCAL_MODEL_PATH", r"C:\Users\SATAP\.a
 MODO = os.getenv("MODO", "gemini")  # "gemini" o "heuristico"
 USAR_CAPTURA = os.getenv("USAR_CAPTURA", "false").lower() == "true"
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
+HOLD_BROWSER_OPEN = os.getenv("HOLD_BROWSER_OPEN", "true").lower() == "true"
 SLOW_MO = int(os.getenv("SLOW_MO", "100"))
 
 USER_DATA_DIR = Path("browser_profile")
