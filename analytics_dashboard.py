@@ -527,6 +527,69 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
         </div>
 
         <!-- ================================================================ -->
+        <!-- SECCIÓN 0: MONITOREO DE MESA Y OPONENTES EN VIVO (LIVE HUD)      -->
+        <!-- ================================================================ -->
+        <div id="sec-live" class="control-section" style="margin-bottom: 25px;">
+            <div class="section-header">
+                <h2>📡 0. Monitoreo de Mesa y Oponentes en Vivo (Live HUD &amp; Match Tracking)</h2>
+                <span class="badge badge-green">Actualización en vivo a 3s</span>
+            </div>
+
+            <div class="grid-2">
+                <!-- Tarjeta 1: Estado de la Mesa -->
+                <div class="card" style="border-left: 4px solid var(--accent-blue);">
+                    <div class="card-title">
+                        <span>🎴 Estado de la Mano Actual (#<span id="live-hand-num">1</span>)</span>
+                        <span class="badge badge-purple" id="live-street-badge">PREFLOP</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                        <div style="background: var(--bg-card-alt); padding: 10px; border-radius: 8px;">
+                            <div style="font-size: 0.75rem; color: var(--text-muted);">MIS CARTAS:</div>
+                            <div style="font-size: 1.2rem; font-weight: 800; color: #38bdf8;" id="live-my-cards">Esperando cartas...</div>
+                        </div>
+                        <div style="background: var(--bg-card-alt); padding: 10px; border-radius: 8px;">
+                            <div style="font-size: 0.75rem; color: var(--text-muted);">MESA COMUNITARIA:</div>
+                            <div style="font-size: 1.2rem; font-weight: 800; color: #f59e0b;" id="live-board-cards">Ninguna</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #e2e8f0;">
+                        <span>💰 Bote Actual: <strong id="live-pot" style="color:#10b981;">$0</strong></span>
+                        <span>📍 Posición: <strong id="live-pos" style="color:#a855f7;">Desconocida</strong></span>
+                    </div>
+                </div>
+
+                <!-- Tarjeta 2: Perfil del Rival -->
+                <div class="card" style="border-left: 4px solid var(--accent-amber);">
+                    <div class="card-title">
+                        <span>👤 Perfil Explotativo del Oponente en Vivo</span>
+                        <span class="badge badge-amber" id="live-opp-style">NUEVO RIVAL</span>
+                    </div>
+                    <div style="font-size: 0.95rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px;" id="live-opp-name">Oponente no detectado aún</div>
+                    <div style="display: flex; gap: 14px; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px;">
+                        <span>Manos BDD: <strong id="live-opp-hands">0</strong></span>
+                        <span>VPIP: <strong id="live-opp-vpip">0%</strong></span>
+                        <span>PFR: <strong id="live-opp-pfr">0%</strong></span>
+                        <span>AF: <strong id="live-opp-af">1.0</strong></span>
+                    </div>
+                    <div style="font-size: 0.78rem; background: rgba(245, 158, 11, 0.1); border: 1px dashed rgba(245, 158, 11, 0.4); padding: 8px; border-radius: 6px; color: #fbbf24;" id="live-opp-tactic">
+                        Directriz Táctica: Juego equilibrado GTO estándar.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Feed de Eventos en Vivo -->
+            <div class="card">
+                <div class="card-title">
+                    <span>📜 Feed de Eventos y Secuencia Cronológica de la Partida en Vivo</span>
+                    <span class="badge badge-blue">Log en vivo</span>
+                </div>
+                <div id="live-events-feed" style="background: #080c14; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.8rem; height: 140px; overflow-y: auto; color: #38bdf8;">
+                    [00:00:00] Esperando conexión de partida...
+                </div>
+            </div>
+        </div>
+
+        <!-- ================================================================ -->
         <!-- SECCIÓN 1: OVERVIEW (KPIs + DIAGNÓSTICOS + TABLA PRINCIPAL)      -->
         <!-- ================================================================ -->
         <div id="sec-1" class="control-section">
@@ -2087,6 +2150,45 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
                 const res = await fetch('/api/analytics', {{ cache: 'no-store' }});
                 if (!res.ok) throw new Error('Modo archivo estático');
                 const freshData = await res.json();
+
+                const live = freshData.live_status || {{}};
+                if (live.hand_number) {{
+                    const elHandNum = document.getElementById('live-hand-num');
+                    if (elHandNum) elHandNum.textContent = live.hand_number || 1;
+                    const elStreet = document.getElementById('live-street-badge');
+                    if (elStreet) elStreet.textContent = live.current_street || 'PREFLOP';
+                    const elMyCards = document.getElementById('live-my-cards');
+                    if (elMyCards) elMyCards.textContent = (live.my_cards || []).join(' ') || 'En espera...';
+                    const elBoard = document.getElementById('live-board-cards');
+                    if (elBoard) elBoard.textContent = (live.community_cards || []).join(' ') || 'Ninguna';
+                    const elPot = document.getElementById('live-pot');
+                    if (elPot) elPot.textContent = '$' + (live.last_pot || 0);
+                    const elPos = document.getElementById('live-pos');
+                    if (elPos) elPos.textContent = live.position_name || 'Desconocida';
+
+                    const opp = live.opp_profile || {{}};
+                    const elStyle = document.getElementById('live-opp-style');
+                    if (elStyle) elStyle.textContent = opp.estilo || 'NUEVO RIVAL';
+                    const elName = document.getElementById('live-opp-name');
+                    if (elName) elName.textContent = (opp.nickname || live.opp_nick || 'Rival') + (live.opp_id ? ' (#' + live.opp_id + ')' : '');
+                    const elHands = document.getElementById('live-opp-hands');
+                    if (elHands) elHands.textContent = opp.manos || 0;
+                    const elVpip = document.getElementById('live-opp-vpip');
+                    if (elVpip) elVpip.textContent = (opp.vpip_pct || 0) + '%';
+                    const elPfr = document.getElementById('live-opp-pfr');
+                    if (elPfr) elPfr.textContent = (opp.pfr_pct || 0) + '%';
+                    const elAf = document.getElementById('live-opp-af');
+                    if (elAf) elAf.textContent = opp.agresividad || '1.0';
+                    const elTactic = document.getElementById('live-opp-tactic');
+                    if (elTactic) elTactic.textContent = 'Directriz Táctica: ' + (opp.recomendacion_tactica || 'Juego equilibrado GTO estándar.');
+
+                    const eventsFeed = document.getElementById('live-events-feed');
+                    if (eventsFeed && live.live_events) {{
+                        eventsFeed.innerHTML = live.live_events.map(ev => `<div>${{ev}}</div>`).join('');
+                        eventsFeed.scrollTop = eventsFeed.scrollHeight;
+                    }}
+                }}
+
                 const newHands = (freshData.all_hands || []).length;
                 const newDecs = (freshData.all_decisions || []).length;
                 if (newHands !== lastHandsCount || newDecs !== lastDecisionsCount) {{
