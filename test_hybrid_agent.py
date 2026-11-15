@@ -37,13 +37,13 @@ class TestHybridAgent(unittest.TestCase):
         self.assertAlmostEqual(sum(probs.values()), 1.0)
 
     def test_opponent_model_training_and_prediction(self):
-        # Create dummy training data
-        # Features: [pot_size, current_bet, board_cards_count, VPIP, PFR, folds, calls, raises]
+        # Create dummy training data with 10 features:
+        # [pot_size, current_bet, pot_odds, board_cards_count, hand_strength, VPIP, PFR, folds, calls, raises]
         X_train = np.array([
-            [50, 10, 0, 0.25, 0.15, 1, 2, 0],
-            [200, 50, 3, 0.25, 0.15, 0, 1, 3],
-            [100, 20, 3, 0.25, 0.15, 2, 1, 1],
-            [30, 5, 0, 0.25, 0.15, 3, 0, 0]
+            [50, 10, 0.166, 0, 0.5, 0.25, 0.15, 1, 2, 0],
+            [200, 50, 0.2, 3, 0.7, 0.25, 0.15, 0, 1, 3],
+            [100, 20, 0.166, 3, 0.4, 0.25, 0.15, 2, 1, 1],
+            [30, 5, 0.142, 0, 0.3, 0.25, 0.15, 3, 0, 0]
         ])
         y_train = np.array([1, 2, 0, 0]) # 0: fold, 1: call, 2: raise
 
@@ -67,7 +67,10 @@ class TestHybridAgent(unittest.TestCase):
 
     def test_decision_maker(self):
         # Pre-train opponent model so predict_proba works
-        X_train = np.array([[50, 10, 0, 0.25, 0.15, 1, 2, 0], [200, 50, 3, 0.25, 0.15, 0, 1, 3]])
+        X_train = np.array([
+            [50, 10, 0.166, 0, 0.5, 0.25, 0.15, 1, 2, 0],
+            [200, 50, 0.2, 3, 0.7, 0.25, 0.15, 0, 1, 3]
+        ])
         y_train = np.array([0, 1])
         self.opponent_model.train(X_train, y_train)
 

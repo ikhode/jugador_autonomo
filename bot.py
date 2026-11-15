@@ -1721,7 +1721,9 @@ def decidir_accion_local(dom_data: dict) -> PokerDecision:
     game_state = {
         "pot_size": pot,
         "current_bet": current_bet,
-        "board_cards_count": board_cards_count
+        "board_cards_count": board_cards_count,
+        "mis_cartas": dom_data.get('mis_cartas', ''),
+        "cartas_comunitarias": comunitarias_str
     }
     game_state_mgr.update_game_state(game_state)
 
