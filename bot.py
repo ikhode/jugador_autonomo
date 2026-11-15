@@ -2350,12 +2350,37 @@ def main():
 
                         def procesar_payload_ipoker(payload_str):
                             try:
-                                if any(k in payload_str for k in ["playerStates", "pots", "cards", "roundNo", "gameCards", "nickname", "playerCode", "isDealer", "winningHand"]):
+                                if any(k in payload_str for k in ["playerStates", "pots", "cards", "roundNo", "gameCards", "nickname", "playerCode", "isDealer", "winningHand", "classId", "actionCode", "actions"]):
                                     start_idx = payload_str.find('{')
                                     end_idx = payload_str.rfind('}')
                                     if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
                                         json_str = payload_str[start_idx:end_idx+1].replace('\\"', '"')
                                         data_json = json.loads(json_str)
+
+                                        class_id = data_json.get("classId")
+
+                                        # Decodificar classId 10017 (Turn Notification & Legal Actions)
+                                        if class_id == 10017:
+                                            actions = data_json.get("actions", [])
+                                            seat_idx = data_json.get("seatIndex")
+                                            tracker.http_turn_signal = True
+                                            tracker.registrar_evento("WS_TURNO", f"Turno asiento {seat_idx} ({len(actions)} acciones legales)")
+                                            if 'table_tracker' in globals() and table_tracker is not None:
+                                                table_tracker.actualizar_jugador(seat=seat_idx, is_turn=True)
+
+                                        # Decodificar classId 10029 (Player Action Performed)
+                                        if class_id == 10029:
+                                            seat_idx = data_json.get("seatIndex")
+                                            act_code = data_json.get("actionCode")
+                                            act_amt = float(data_json.get("actionAmount", 0.0))
+                                            chips_left = float(data_json.get("chips", 0.0))
+                                            code_map = {0: "FOLD", 1: "SB_BET", 2: "BB_BET", 3: "CALL", 6: "BET", 7: "ALL_IN", 15: "ANTE", 23: "RAISE"}
+                                            act_str = code_map.get(act_code, f"ACTION_{act_code}")
+                                            tracker.registrar_evento("WS_ACCION_JUGADOR", f"Asiento {seat_idx} -> {act_str} ({act_amt}) | Fichas: {chips_left}")
+                                            if 'table_tracker' in globals() and table_tracker is not None:
+                                                is_fold = (act_code == 0)
+                                                status = "FOLD" if is_fold else "ACTIVO"
+                                                table_tracker.actualizar_jugador(player_id=f"Seat_{seat_idx}", seat=seat_idx, bet=act_amt, stack=chips_left, status=status)
 
                                         if "nickname" in data_json:
                                             tracker.opp_nick = data_json["nickname"]
