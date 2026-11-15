@@ -41,7 +41,7 @@ DEFAULT_TARGET_DELTA_BB100 = float(os.getenv("DEFAULT_TARGET_DELTA_BB100", "10.0
 
 
 def obtener_modo_activo() -> str:
-    """Normaliza MODO y ACTIVE_MODEL al esquema único: determinista | hibrido | gemini."""
+    """Normaliza MODO y ACTIVE_MODEL al esquema único: determinista | hibrido | gemini | local."""
     if str(ACTIVE_MODEL or "").strip().lower() in ("gto-heuristic", "determinista", "heuristico"):
         return "determinista"
     m = str(MODO or "gemini").strip().lower()
@@ -49,6 +49,8 @@ def obtener_modo_activo() -> str:
         return "determinista"
     if m in ("hibrido", "hybrid"):
         return "hibrido"
+    if m in ("local", "local_hybrid", "local-models", "forest", "xgboost"):
+        return "local"
     return "gemini"
 USAR_CAPTURA = os.getenv("USAR_CAPTURA", "false").lower() == "true"
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
