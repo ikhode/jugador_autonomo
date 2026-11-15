@@ -129,7 +129,7 @@ USE_GENKIT = os.getenv("USE_GENKIT", "false").lower() == "true"
 GENKIT_DEV_UI = os.getenv("GENKIT_DEV_UI", "false").lower() == "true"
 PROMPT_VERSION = os.getenv("PROMPT_VERSION", "v1")
 AI_DECISION_TIMEOUT_SEC = float(os.getenv("AI_DECISION_TIMEOUT_SEC", "13.0"))
-AI_HTTP_TIMEOUT_MS = int(os.getenv("AI_HTTP_TIMEOUT_MS", "12000"))
+AI_HTTP_TIMEOUT_MS = int(os.getenv("AI_HTTP_TIMEOUT_MS", "15000"))
 AI_MAX_SCHEMA_RETRIES = int(os.getenv("AI_MAX_SCHEMA_RETRIES", "1"))
 AI_RETRY_ATTEMPTS = int(os.getenv("AI_RETRY_ATTEMPTS", "2"))
 AI_RETRY_BASE_MS = int(os.getenv("AI_RETRY_BASE_MS", "150"))

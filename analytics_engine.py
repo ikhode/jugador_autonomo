@@ -668,7 +668,7 @@ def evaluar_decision_estrategica(
     else:
         legal_actions = [a.upper().strip() for a in legal_actions]
 
-    hay_check_gratis = (call_amt <= 0) or ("CHECK" in legal_actions and call_amt == 0)
+    hay_check_gratis = (call_amt <= 0) and ("CHECK" in legal_actions)
 
     # 1. Estimar Equity y Pot Odds
     equity = estimar_equity_mano(
@@ -787,6 +787,16 @@ def evaluar_decision_estrategica(
     act_norm = _norm_act(act)
     gto_norm = _norm_act(gto_action)
 
+    legal_norms = {_norm_act(a) for a in legal_actions}
+
+    # Adaptar recomendación GTO si las acciones de mesa restringen opciones (ej. Push/Fold)
+    if gto_norm == "RAISE" and "RAISE" not in legal_norms and "ALL_IN" in legal_norms:
+        gto_norm = "ALL_IN"
+        gto_action = "ALL_IN"
+    elif gto_norm == "CALL" and "CALL" not in legal_norms and "ALL_IN" in legal_norms:
+        gto_norm = "ALL_IN"
+        gto_action = "ALL_IN"
+
     # Verificar si la acción pertenece al soporte de la estrategia mixta (> 0%)
     mixed_support_norms = {_norm_act(k) for k, v in gto_mixed_freq.items() if v > 0.0}
     in_mixed_support = act_norm in mixed_support_norms
@@ -795,6 +805,14 @@ def evaluar_decision_estrategica(
     candidate_actions = ["CHECK", "BET", "RAISE"] if hay_check_gratis else ["FOLD", "CALL", "RAISE"]
     if eff_stack <= 9.0 * bb or gto_norm == "ALL_IN":
         candidate_actions.append("ALL_IN")
+
+    # Restringir candidate_actions a las opciones legalmente disponibles
+    valid_candidates = [k for k in candidate_actions if _norm_act(k) in legal_norms or k in legal_actions]
+    if valid_candidates:
+        candidate_actions = valid_candidates
+    else:
+        candidate_actions = list(legal_actions)
+
     ev_best = max(ev_by_action.get(k, -9999.0) for k in candidate_actions)
     if act_norm == gto_norm:
         ev_best = max(ev_best, ev_taken)

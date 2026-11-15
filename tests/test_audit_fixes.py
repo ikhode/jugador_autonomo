@@ -240,4 +240,103 @@ def test_mejora6_position_inference_never_desconocida():
             assert row[0] != "DESCONOCIDA"
 
 
+def test_mejora2_timer_artifacts_rejected_from_profiler_and_db():
+    from opponents_profiler import OpponentProfiler, es_nickname_invalido, sanitizar_nickname
+    import sqlite3
+
+    assert es_nickname_invalido("Time:\n14") is True
+    assert es_nickname_invalido("Time: 12") is True
+    assert es_nickname_invalido("Tiempo:\n10") is True
+    assert es_nickname_invalido("") is True
+    assert es_nickname_invalido("Player123") is False
+
+    assert sanitizar_nickname("Time:\n14") == ""
+    assert sanitizar_nickname("Time: 12") == ""
+    assert sanitizar_nickname("shark 450") == "shark"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "clean_opp.db"
+        prof = OpponentProfiler(db_path=str(db_path))
+
+        # Intentar registrar acciones o manos para un timer
+        prof.registrar_accion_rival(
+            player_id="Time:\n14",
+            nickname="Time:\n14",
+            accion="BET",
+            calle="PREFLOP",
+            hand_id=1,
+        )
+        prof.incrementar_manos_rival("Time: 12", "Time: 12", hand_id=2)
+
+        # Verificar que no se insertó ninguna fila corrupta en la base de datos
+        with sqlite3.connect(str(db_path)) as conn:
+            rows = conn.execute(
+                "SELECT * FROM oponentes WHERE player_id LIKE '%Time%' OR nickname LIKE '%Time%'"
+            ).fetchall()
+            assert len(rows) == 0, f"Se encontraron filas corruptas con Time: {rows}"
+
+        prof.close()
+
+
+def test_mejora3_push_fold_a_igualar_extraction_logic():
+    # Simula la lógica JS de extracción de aIgualar cuando hay All-In y no hay Call
+    mi_stack = "420"
+    opciones_accion = ["FOLD", "ALL_IN"]
+    hay_check_dom = "CHECK" in opciones_accion
+    hay_call_dom = "CALL" in opciones_accion
+    hay_allin_dom = "ALL_IN" in opciones_accion or "ALLIN" in opciones_accion
+    call_val = ""
+    allin_val = ""  # En el DOM el botón ALL IN muchas veces no tiene span .action-value
+    apuestas_rivales = ""
+
+    a_igualar = "0" if hay_check_dom else (
+        call_val or (allin_val or mi_stack if (hay_allin_dom and not hay_call_dom) else "") or apuestas_rivales or "0"
+    )
+    assert a_igualar == "420", f"Esperado 420 (miStack) al enfrentar shove sin Call, pero dio {a_igualar}"
+
+
+def test_mejora4_legal_actions_filtering_prevents_false_blunder_on_shove():
+    # Mano de la auditoría: Hero tiene Q♥ J♥ en mesa Q♦ 7♥ 8♦ (Top Pair, Buen Kicker),
+    # las únicas opciones legales en la mesa son FOLD y ALL_IN.
+    # El solver/heurística no debe comparar contra un BET/RAISE ilegal no-allin.
+    res = evaluar_decision_estrategica(
+        hole_cards="Q♥ J♥",
+        board="Q♦ 7♥ 8♦",
+        pot_size=200.0,
+        to_call=0.0,
+        effective_stack=372.0,
+        action_taken="ALL_IN",
+        bet_amount=372.0,
+        position="SB",
+        street="FLOP",
+        opponent_profile="REGULAR EQUILIBRADO",
+        legal_actions=["FOLD", "ALL_IN"],
+        big_blind=20.0,
+    )
+    assert res["decision_quality"] == "OPTIMA"
+    assert float(res["ev_lost_bb"]) == 0.0
+    assert res["is_strategic_error"] is False
+    assert res["action_deviation"] == "EXACT_MATCH"
+
+
+def test_mejora4_hay_check_gratis_requires_check_in_legal_actions():
+    # Si call_amt <= 0 pero CHECK no está en legal_actions, NO es check gratis
+    res = evaluar_decision_estrategica(
+        hole_cards="7♠ 2♦",
+        board="A♣ K♣ Q♦",
+        pot_size=300.0,
+        to_call=0.0,
+        effective_stack=200.0,
+        action_taken="FOLD",
+        bet_amount=0.0,
+        position="BB",
+        street="FLOP",
+        opponent_profile="REGULAR EQUILIBRADO",
+        legal_actions=["FOLD", "ALL_IN"],
+        big_blind=20.0,
+    )
+    assert "Fold ilegal/subóptimo teniendo Check gratuito disponible" not in res.get("error_description", "")
+
+
+
 

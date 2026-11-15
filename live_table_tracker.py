@@ -17,7 +17,11 @@ from typing import Any, Dict, List, Optional
 from opponents_profiler import (
     OpponentProfiler,
     generar_analisis_explotativo_contextual,
+    es_nickname_invalido,
+    sanitizar_nickname,
 )
+
+_sanitizar_nickname = sanitizar_nickname
 
 LIVE_STATE_PATH = Path("logs/live_table_state.json")
 
@@ -72,20 +76,8 @@ def _parse_num(val: Any) -> float:
         return 0.0
 
 
-def _sanitizar_nickname(raw_nick: Optional[str]) -> str:
-    """Limpia artefactos de DOM (timers 'Time: 12' o stacks pegados) del nickname."""
-    txt = re.sub(r"\s+", " ", str(raw_nick or "")).strip()
-    if not txt:
-        return ""
-    if re.match(r"^(Time|Tiempo)\s*:\s*\d+", txt, flags=re.IGNORECASE):
-        return ""
-    # Si viene con formato "Nombre 490" o "Nombre 1,500" al final, quitar el número de stack
-    cleaned = re.sub(r"\s+\$?[\d,]+(?:\.\d+)?$", "", txt).strip()
-    if cleaned and not cleaned.isdigit():
-        txt = cleaned
-    if txt.isdigit():
-        return ""
-    return txt
+# Reutiliza la función centralizada de sanitización de nicknames de opponents_profiler
+_sanitizar_nickname = sanitizar_nickname
 
 
 class LiveTableMonitor:
@@ -183,6 +175,8 @@ class LiveTableMonitor:
         with self._lock:
             pid = str(player_id or "").strip()
             nick = _sanitizar_nickname(nickname)
+            if es_nickname_invalido(pid):
+                pid = nick or ""
             norm_status = normalizar_estado_jugador(status)
 
             if seat is not None and int(seat) > self.max_asientos:

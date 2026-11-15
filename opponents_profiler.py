@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
+import re
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -99,9 +100,47 @@ SessionLocal = sessionmaker(bind=engine)
 def inicializar_db(target_engine=None) -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     _ensure_oponentes_schema(target_engine or engine)
+    try:
+        with (target_engine or engine).begin() as conn:
+            conn.execute(
+                text(
+                    "DELETE FROM oponentes WHERE player_id LIKE 'Time:%' OR nickname LIKE 'Time:%' "
+                    "OR player_id LIKE 'Tiempo:%' OR nickname LIKE 'Tiempo:%'"
+                )
+            )
+    except Exception:
+        pass
 
 
 inicializar_db()
+
+
+def es_nickname_invalido(raw: Optional[str]) -> bool:
+    """Detecta si una cadena es un artefacto de interfaz (ej. 'Time:\n14', 'Time: 12', 'Tiempo: 10')."""
+    if not raw:
+        return True
+    txt = re.sub(r"\s+", " ", str(raw)).strip()
+    if not txt:
+        return True
+    if re.match(r"^(Time|Tiempo)[\s:\n]*\d+", txt, flags=re.IGNORECASE):
+        return True
+    return False
+
+
+def sanitizar_nickname(raw_nick: Optional[str]) -> str:
+    """Limpia artefactos de DOM (timers 'Time: 12' o stacks pegados) del nickname."""
+    txt = re.sub(r"\s+", " ", str(raw_nick or "")).strip()
+    if not txt:
+        return ""
+    if es_nickname_invalido(txt):
+        return ""
+    # Si viene con formato "Nombre 490" o "Nombre 1,500" al final, quitar el número de stack
+    cleaned = re.sub(r"\s+\$?[\d,]+(?:\.\d+)?$", "", txt).strip()
+    if cleaned and not cleaned.isdigit():
+        txt = cleaned
+    if txt.isdigit():
+        return ""
+    return txt
 
 
 def wilson_ci(exitos: int, total: int, z: float = 1.96) -> Tuple[float, float]:
@@ -136,7 +175,7 @@ def _add_alias(existing_raw: Optional[str], *candidates: str) -> str:
     seen = {a.lower() for a in aliases}
     for cand in candidates:
         c = str(cand or "").strip()
-        if c and c.lower() not in seen:
+        if c and not es_nickname_invalido(c) and c.lower() not in seen:
             aliases.append(c)
             seen.add(c.lower())
     return json.dumps(aliases, ensure_ascii=False)
@@ -285,6 +324,13 @@ class OpponentProfiler:
         """Resuelve un oponente por player_id, nickname o aliases conocidos sin duplicar registros."""
         pid = str(player_id or "").strip()
         nick = str(nickname or "").strip()
+
+        # Descartar artefactos de DOM o timers
+        if es_nickname_invalido(pid):
+            pid = ""
+        if es_nickname_invalido(nick):
+            nick = ""
+
         target_id = pid or nick
         if not target_id:
             return None

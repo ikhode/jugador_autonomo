@@ -9,7 +9,7 @@ from typing import Optional
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import config
 from poker_agent import PokerAgent, PokerDecision
-from opponents_profiler import OpponentProfiler
+from opponents_profiler import OpponentProfiler, sanitizar_nickname, es_nickname_invalido
 from poker_experience_memory import PokerExperienceMemory
 from poker_gto_engine import (
     clasificar_mano_preflop,
@@ -543,7 +543,10 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             .map(el => el.innerText.trim()).filter(Boolean).join(' | ') || '0';
 
         const jugadoresMesa = Array.from(document.querySelectorAll('.player-area:not(.my-player)')).map((area, idx) => {
-            const nick = (area.querySelector('.player-name, .nickname, .username')?.innerText || `Rival_${idx + 1}`).trim();
+            let nick = (area.querySelector('.player-name, .nickname, .username')?.innerText || '').trim();
+            if (!nick || /^(Time|Tiempo)[\s:\n]*\d+/i.test(nick) || /^\d+$/.test(nick)) {
+                nick = `Rival_${idx + 1}`;
+            }
             const stackTxt = (area.querySelector('.player-chips, .chips-amount, .stack-amount, .player-balance')?.innerText || '0').trim();
             const betEl = area.querySelector('.player-bet .amount, .bet-amount, .chip-amount, .bet');
             const betVal = (betEl ? (betEl.innerText || betEl.textContent || '') : '').replace(/[^\d.]/g, '');
@@ -564,7 +567,7 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
         const hayCheckDom = opcionesAccion.includes('CHECK');
         const hayCallDom = opcionesAccion.includes('CALL');
         const hayAllinDom = opcionesAccion.includes('ALL_IN') || opcionesAccion.includes('ALLIN');
-        const aIgualar = hayCheckDom ? '0' : (callVal || (!hayCallDom && hayAllinDom ? allinVal : '') || apuestasRivales || '0');
+        const aIgualar = hayCheckDom ? '0' : (callVal || (hayAllinDom && !hayCallDom ? (allinVal || miStack) : '') || apuestasRivales || '0');
 
         const modales = [];
         if (document.querySelector('.filter-play-button')) modales.push('Jugar Poker');
@@ -1002,8 +1005,12 @@ def actualizar_dom_data_conservando_contexto(
             for j in jugadores:
                 if not isinstance(j, dict):
                     continue
-                nick_j = j.get("nickname", "")
-                pid_j = j.get("player_id") or nick_j
+                raw_nick = j.get("nickname", "")
+                raw_pid = j.get("player_id")
+                nick_j = sanitizar_nickname(raw_nick) or f"Rival_{j.get('asiento', 1)}"
+                pid_j = sanitizar_nickname(raw_pid) if raw_pid else nick_j
+                if not pid_j or es_nickname_invalido(pid_j):
+                    pid_j = nick_j
                 if not getattr(tracker_obj, "opp_nick", ""):
                     tracker_obj.opp_nick = nick_j
                 if not getattr(tracker_obj, "opp_id", ""):
