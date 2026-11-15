@@ -288,14 +288,15 @@ class PokerAgent:
                     print(f"⚠️ Modelo {model_name} no disponible ({type(e).__name__}), probando respaldo...")
                 continue
 
-        # Si fallaron o se agotó la cuota en los modelos en la nube de Gemini, intentar inferencia local Gemma 4B si está configurada
-        try:
-            prompt_local = f"Mesa de póker: {dom_data}. Responde en JSON con la acción (FOLD, CHECK, CALL, RAISE, ALL_IN), evaluacion y confianza."
-            dec_local = consultar_gemma_local(prompt_local, dom_data=dom_data)
-            if dec_local:
-                return dec_local
-        except Exception:
-            pass
+        # Intentar inferencia local Gemma 4B solo si ACTIVE_MODEL está explícitamente configurado como 'gemma-4b-local'
+        if active_model == "gemma-4b-local":
+            try:
+                prompt_local = f"Mesa de póker: {dom_data}. Responde en JSON con la acción (FOLD, CHECK, CALL, RAISE, ALL_IN), evaluacion y confianza."
+                dec_local = consultar_gemma_local(prompt_local, dom_data=dom_data)
+                if dec_local:
+                    return dec_local
+            except Exception:
+                pass
 
         return PokerDecision(
             evaluacion="Respuesta rápida de fallback por timeout o API ocupada",
@@ -351,24 +352,26 @@ def precargar_gemma_local():
         return None
 
 def consultar_gemma_local(prompt: str, dom_data: Optional[dict] = None) -> Optional[PokerDecision]:
-    """Ejecuta inferencia local con Gemma 4B GGUF utilizando estructuración JSON."""
+    """Ejecuta inferencia local con Gemma 4B GGUF utilizando estructuración JSON sin gramática estricta para evitar crash C++."""
     llm = precargar_gemma_local()
     if not llm:
         return None
     try:
-        sys_prompt = "Eres un bot profesional de póker GTO. Responde estrictamente en formato JSON válido con los campos: evaluacion, estrategia_competitiva, estado_pantalla, es_mi_turno, accion, monto_apuesta, confianza. IMPORTANTE: 'confianza' debe ser un número decimal float entre 0.0 y 1.0 (ej. 0.85). 'monto_apuesta' debe ser un número entero."
+        sys_prompt = "Eres un bot profesional de póker GTO. Responde únicamente en formato JSON válido con los campos: \"accion\" (\"FOLD\", \"CHECK\", \"CALL\", \"RAISE\", \"ALL_IN\"), \"evaluacion\", \"confianza\" (float 0.0 a 1.0), \"monto_apuesta\" (entero)."
         messages = [
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": prompt}
         ]
+        # Omitimos response_format={"type": "json_object"} porque activa el muestreador de gramática en C++ que causa GGML_ASSERT en Gemma-4 / ops.cpp
         res = llm.create_chat_completion(
             messages=messages,
-            response_format={"type": "json_object"},
             temperature=0.1,
-            max_tokens=512
+            max_tokens=350
         )
         raw_content = res['choices'][0]['message']['content'].strip()
-        clean_json = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_content, flags=re.S).strip()
+        json_match = re.search(r"\{.*\}", raw_content, flags=re.DOTALL)
+        clean_json = json_match.group(0) if json_match else raw_content
+        clean_json = re.sub(r"^```(?:json)?\s*|\s*```$", "", clean_json, flags=re.S).strip()
         data = json.loads(clean_json)
 
         accion = str(data.get("accion") or data.get("action") or "CHECK").upper()
@@ -408,6 +411,14 @@ def consultar_gemma_local(prompt: str, dom_data: Optional[dict] = None) -> Optio
         )
 
         opciones_dom = str((dom_data or {}).get("opciones_disponibles", "") or (dom_data or {}).get("botones_visibles", "")).upper()
+        if decision.accion == "FOLD" and "CHECK" in opciones_dom:
+            decision.accion = "CHECK"
+            decision.evaluacion = f"[Auto-Check Gratis] {decision.evaluacion}"
+
+        return decision
+    except Exception as e:
+        print(f"⚠️ [LLM LOCAL] Error durante inferencia Gemma 4B: {e}")
+        return None
         if decision.accion == "FOLD" and "CHECK" in opciones_dom:
             decision.accion = "CHECK"
             decision.evaluacion = f"[Auto-Check Gratis] {decision.evaluacion}"
