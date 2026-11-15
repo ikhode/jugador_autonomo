@@ -1161,22 +1161,22 @@ def resolver_popup_fold_check_gratis(target) -> bool:
         pass
     return False
 
-def clicar_texto_modal_universal(target, textos: list[str], descripcion: str = "Modal") -> bool:
+def clicar_texto_modal_universal(target, textos: list[str], descripcion: str = "Modal", solo_modal: bool = False) -> bool:
     """
     Busca cualquier elemento visible (button, div, span, a) cuyo texto coincida con alguno de `textos`
     y dispara eventos reales de ratón + click(). Funciona aunque el botón en iPoker sea un <div> o <span>.
     """
     try:
-        clicado = target.evaluate("""(textos) => {
+        clicado = target.evaluate("""({textos, solo_modal}) => {
             if (!document.body) return false;
-            const elementos = Array.from(document.querySelectorAll('button, div, span, a'));
+            const elementos = Array.from(document.querySelectorAll('button, div, span, a, [role="button"]'));
             // Preferir coincidencia exacta en el nodo más interno visible
             for (const t of textos) {
                 const exactos = elementos.filter(el => {
-                    if (el.closest('.actions-area')) return false;
+                    if (solo_modal && el.closest('.actions-area')) return false;
                     const r = el.getBoundingClientRect();
                     const txt = (el.innerText || el.textContent || '').trim();
-                    return r.width > 20 && r.height > 14 && r.width < 500 && txt.toLowerCase() === t.toLowerCase();
+                    return r.width > 15 && r.height > 12 && r.width < 500 && r.height < 250 && txt.toLowerCase() === t.toLowerCase();
                 });
                 if (exactos.length > 0) {
                     const btn = exactos[exactos.length - 1];
@@ -1186,15 +1186,17 @@ def clicar_texto_modal_universal(target, textos: list[str], descripcion: str = "
                     return true;
                 }
             }
+            // Coincidencia parcial (ej. "Raise a 60" coincide con "raise a" o "raise")
             for (const t of textos) {
                 const parciales = elementos.filter(el => {
-                    if (el.closest('.actions-area')) return false;
+                    if (solo_modal && el.closest('.actions-area')) return false;
                     const r = el.getBoundingClientRect();
                     const txt = (el.innerText || el.textContent || '').trim();
-                    return r.width > 20 && r.height > 14 && r.width < 450 && r.height < 120 && txt.toLowerCase().includes(t.toLowerCase());
+                    return r.width > 15 && r.height > 12 && r.width < 500 && r.height < 250 && txt.toLowerCase().includes(t.toLowerCase());
                 });
                 if (parciales.length > 0) {
-                    const btn = parciales[parciales.length - 1];
+                    // Seleccionar el nodo más interno/específico que contiene el texto
+                    const btn = parciales.sort((a, b) => (a.clientWidth * a.clientHeight) - (b.clientWidth * b.clientHeight))[0];
                     btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
                     btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
                     btn.click();
@@ -1202,9 +1204,9 @@ def clicar_texto_modal_universal(target, textos: list[str], descripcion: str = "
                 }
             }
             return false;
-        }""", textos)
+        }""", {"textos": textos, "solo_modal": solo_modal})
         if clicado:
-            print(f"✅ [MODAL UNIVERSAL OK] Clic realizado en '{descripcion}'.")
+            print(f"✅ [CLIC DE TEXTO OK] Clic realizado en '{descripcion}'.")
             return True
     except Exception:
         pass
