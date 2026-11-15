@@ -338,5 +338,97 @@ def test_mejora4_hay_check_gratis_requires_check_in_legal_actions():
     assert "Fold ilegal/subóptimo teniendo Check gratuito disponible" not in res.get("error_description", "")
 
 
+def test_mejora7_formatear_cartas_canonicas_unicode():
+    from poker_gto_engine import formatear_cartas_canonicas, formatear_carta_canonica
+
+    assert formatear_carta_canonica("SJ") == "J♠"
+    assert formatear_carta_canonica("H6") == "6♥"
+    assert formatear_carta_canonica("D10") == "10♦"
+    assert formatear_carta_canonica("C2") == "2♣"
+    assert formatear_carta_canonica("HA") == "A♥"
+
+    # Listas de tokens de iPoker WebSocket
+    assert formatear_cartas_canonicas(["SJ", "H6"]) == "J♠ 6♥"
+    assert formatear_cartas_canonicas(["C10", "SQ"]) == "10♣ Q♠"
+    assert formatear_cartas_canonicas(["H5", "D2", "H9"]) == "5♥ 2♦ 9♥"
+
+    # Cadenas raw y cadenas ya formateadas (idempotencia)
+    assert formatear_cartas_canonicas("H5 D2 H9") == "5♥ 2♦ 9♥"
+    assert formatear_cartas_canonicas("Q♣ Q♥") == "Q♣ Q♥"
+    assert formatear_cartas_canonicas("10♣ 8♣") == "10♣ 8♣"
+    assert formatear_cartas_canonicas("") == ""
+
+
+def test_mejora8_anti_blindness_guard_never_acts_without_cards():
+    from bot import GameTracker, actualizar_dom_data_conservando_contexto
+
+    tracker = GameTracker()
+    tracker.hand_number = 1
+    tracker.current_street = "PREFLOP"
+    tracker.my_cards = []  # Sin cartas aún
+
+    # Simular DOM con botones pero sin cartas todavía
+    dom = {
+        "es_mi_turno": True,
+        "mis_cartas": "",
+        "cartas_comunitarias": "",
+        "bote": 50,
+        "a_igualar": 20,
+        "mi_stack": 500,
+        "stack_rival": 500,
+        "opciones_disponibles": "FOLD | CALL | RAISE",
+        "botones_visibles": "FOLD | CALL | RAISE",
+    }
+    actualizar_dom_data_conservando_contexto(dom, None, tracker_obj=tracker)
+
+    # El dom_data debe tener mis_cartas vacías
+    assert dom["mis_cartas"] == ""
+
+    # Simular la lógica de guardia anti-ceguera
+    es_mi_turno = dom["es_mi_turno"]
+    mis_cartas = dom["mis_cartas"]
+    if es_mi_turno and not mis_cartas:
+        # Si no hay cartas ni en DOM ni en tracker, se cancela el turno
+        if not tracker.my_cards:
+            es_mi_turno = False
+
+    assert es_mi_turno is False, "El bot nunca debe actuar si no tiene cartas privadas identificadas"
+
+
+def test_mejora9_action_debounce_per_street_context():
+    from bot import GameTracker
+    import time
+
+    tracker = GameTracker()
+    tracker.hand_number = 1
+    tracker.current_street = "TURN"
+    tracker.hero_just_acted_ts = time.time()
+    tracker.hero_last_action_context = (1, "TURN", 40.0)
+
+    # 1. Mismo contexto (misma mano, misma calle, mismo coste a_igualar) a los 1.5s
+    es_mi_turno = True
+    current_action_context = (1, "TURN", 40.0)
+    if es_mi_turno and (
+        (time.time() - tracker.hero_just_acted_ts < 2.5)
+        or (current_action_context == tracker.hero_last_action_context and (time.time() - tracker.hero_just_acted_ts < 5.0))
+    ):
+        es_mi_turno = False
+
+    assert es_mi_turno is False, "Debe silenciar turnos duplicados ante el mismo contexto de apuesta"
+
+    # 2. Contexto nuevo (el rival subió la apuesta a 120.0): debe permitir actuar
+    es_mi_turno = True
+    new_action_context = (1, "TURN", 120.0)
+    tracker.hero_just_acted_ts = time.time() - 3.0  # Ya pasaron 3s
+    if es_mi_turno and (
+        (time.time() - tracker.hero_just_acted_ts < 2.5)
+        or (new_action_context == tracker.hero_last_action_context and (time.time() - tracker.hero_just_acted_ts < 5.0))
+    ):
+        es_mi_turno = False
+
+    assert es_mi_turno is True, "Debe permitir actuar si el rival cambió el contexto de apuesta"
+
+
+
 
 

@@ -46,7 +46,7 @@ class TestFase1Fixes(unittest.TestCase):
         self.assertEqual(res["perfil_rival"]["nickname"], "Villano1")
         self.assertEqual(len(res["perfiles_oponentes"]), 2)
         self.assertEqual(len(res["memoria_errores"]), 1)
-        self.assertEqual(res["mis_cartas"], "As Kd")
+        self.assertIn(res["mis_cartas"], ("As Kd", "A♠ K♦"))
         self.assertIn("tier", res["gto_preflop"])
         self.assertIn("d100", res["gto_frecuencia"])
         self.assertIn("categoria", res["gto_combinacion"])

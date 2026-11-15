@@ -2603,6 +2603,19 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
     engine = PokerAnalyticsEngine(storage=storage)
 
     class AnalyticsRequestHandler(http.server.SimpleHTTPRequestHandler):
+        def do_HEAD(self):
+            parsed = urllib.parse.urlparse(self.path)
+            if parsed.path in ("/", "/index.html", "/dashboard"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+            elif parsed.path in ("/api/live", "/api/analytics"):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+            else:
+                super().do_HEAD()
+
         def do_GET(self):
             parsed = urllib.parse.urlparse(self.path)
             if parsed.path in ("/", "/index.html", "/dashboard"):
@@ -2735,6 +2748,7 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
         except Exception:
             pass
 
+    socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("127.0.0.1", port), AnalyticsRequestHandler) as httpd:
         try:
             httpd.serve_forever()

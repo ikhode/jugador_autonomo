@@ -19,6 +19,8 @@ from poker_gto_engine import (
     evaluar_combinacion_mano_y_mesa,
     evaluar_push_fold_nash,
     decidir_por_ev,
+    formatear_cartas_canonicas,
+    formatear_carta_canonica,
 )
 from analytics_logger import PokerAnalyticsLogger
 from strategic_engine import StrategicEngine
@@ -191,6 +193,7 @@ class GameTracker:
         self.opp_nick = ""
         self.is_dealer = False
         self.position_name = "DESCONOCIDA"
+        self.hero_last_action_context = None
         self.current_street = "PREFLOP"
         self.current_round_no = 1
         self.hero_just_acted_ts = 0.0
@@ -234,8 +237,8 @@ class GameTracker:
                 analytics_logger.finalizar_mano(
                     resultado_str=resultado_str,
                     hand_number=self.hand_number,
-                    hole_cards=" ".join(self.my_cards) if self.my_cards else None,
-                    community_cards=" ".join(self.community_cards) if self.community_cards else None,
+                    hole_cards=formatear_cartas_canonicas(self.my_cards) if self.my_cards else None,
+                    community_cards=formatear_cartas_canonicas(self.community_cards) if self.community_cards else None,
                     pot_final=float(self.last_pot or 0),
                 )
             except Exception:
@@ -279,6 +282,7 @@ class GameTracker:
         self.http_turn_signal = False
         self.is_dealer = False
         self.position_name = "DESCONOCIDA"
+        self.hero_last_action_context = None
         self.current_street = "PREFLOP"
         self.current_round_no = 1
         self.last_hand_tier = "DESCONOCIDO"
@@ -1020,7 +1024,7 @@ def actualizar_dom_data_conservando_contexto(
 
     if tracker_obj is not None:
         dom_data["historial_mano"] = tracker_obj.obtener_contexto_completo()
-        mis_cartas = dom_data.get("mis_cartas", "") or " ".join(getattr(tracker_obj, "my_cards", []) or [])
+        mis_cartas = formatear_cartas_canonicas(dom_data.get("mis_cartas", "") or " ".join(getattr(tracker_obj, "my_cards", []) or []))
         es_preflop = (
             getattr(tracker_obj, "current_street", "PREFLOP") == "PREFLOP"
             or getattr(tracker_obj, "current_round_no", 1) <= 1
@@ -1031,11 +1035,11 @@ def actualizar_dom_data_conservando_contexto(
             if hasattr(tracker_obj, "community_cards"):
                 tracker_obj.community_cards.clear()
         else:
-            comunitarias = dom_data.get("cartas_comunitarias", "") or " ".join(getattr(tracker_obj, "community_cards", []) or [])
+            comunitarias = formatear_cartas_canonicas(dom_data.get("cartas_comunitarias", "") or " ".join(getattr(tracker_obj, "community_cards", []) or []))
         bote = dom_data.get("bote", "") or getattr(tracker_obj, "last_pot", 0) or 0
     else:
-        mis_cartas = dom_data.get("mis_cartas", "")
-        comunitarias = dom_data.get("cartas_comunitarias", "")
+        mis_cartas = formatear_cartas_canonicas(dom_data.get("mis_cartas", ""))
+        comunitarias = formatear_cartas_canonicas(dom_data.get("cartas_comunitarias", ""))
         bote = dom_data.get("bote", 0)
 
     dom_data["mis_cartas"] = mis_cartas
@@ -2349,17 +2353,7 @@ def main():
                         print(f"🔌 [WEBSOCKET CONECTADO] {ws.url}")
 
                         def convertir_cartas_raw(cards_list: list) -> list:
-                            suit_map = {"H": "♥", "S": "♠", "C": "♣", "D": "♦"}
-                            res = []
-                            for c in cards_list:
-                                if isinstance(c, str) and len(c) >= 2 and c != 'X':
-                                    if c[0].upper() in suit_map:
-                                        r = c[1:].upper().replace("T", "10")
-                                        s = suit_map[c[0].upper()]
-                                        res.append(f"{r}{s}")
-                                    else:
-                                        res.append(c)
-                            return res
+                            return [formatear_carta_canonica(c) for c in cards_list if isinstance(c, str) and c != 'X']
 
                         def procesar_payload_ipoker(payload_str):
                             try:
@@ -2420,12 +2414,12 @@ def main():
                                             tracker.registrar_evento("WS_RONDA", f"Calle/Ronda #{ronda} ({tracker.current_street})")
 
                                         if "gameCards" in data_json and isinstance(data_json["gameCards"], list):
-                                            comm = [c for c in data_json["gameCards"] if isinstance(c, str) and c != 'X']
+                                            comm = [formatear_carta_canonica(c) for c in data_json["gameCards"] if isinstance(c, str) and c != 'X']
                                             if comm and tracker.current_round_no in (2, 3, 4):
                                                 tracker.community_cards = comm
 
                                         if "cards" in data_json and isinstance(data_json["cards"], list):
-                                            comm = [c for c in data_json["cards"] if isinstance(c, str) and c != 'X']
+                                            comm = [formatear_carta_canonica(c) for c in data_json["cards"] if isinstance(c, str) and c != 'X']
                                             if comm and tracker.current_round_no in (2, 3, 4):
                                                 for c in comm:
                                                     if c not in tracker.community_cards and len(tracker.community_cards) < 5:
@@ -2474,7 +2468,7 @@ def main():
 
                                                 if "cards" in ps and isinstance(ps["cards"], list):
                                                     cards_raw = [c for c in ps["cards"] if isinstance(c, str) and c != 'X']
-                                                    cards_list = convertir_cartas_raw(cards_raw) if cards_raw else []
+                                                    cards_list = [formatear_carta_canonica(c) for c in cards_raw]
                                                     # Solo guardar como nuestras cartas privadas la primera vez que recibimos 2 cartas en Preflop
                                                     if len(cards_list) == 2 and len(ps["cards"]) == 2 and tracker.current_street == "PREFLOP":
                                                         if not tracker.my_cards:
@@ -2660,11 +2654,19 @@ def main():
                         else:
                             resiliencia.reiniciar_watchdog_mano()
 
-                        turno_id_actual = f"{mis_cartas}|{comunitarias}|{bote}|{botones}"
-                        turno_street_key = (tracker.hand_number, tracker.current_street, mis_cartas, comunitarias)
+                        current_action_context = (tracker.hand_number, tracker.current_street, float(dom_data.get('a_igualar') or 0.0))
 
-                        # Prevención de duplicados: Si acabamos de actuar en esta misma calle/rango de mano hace <2.5s, no consultar de nuevo
-                        if es_mi_turno and turno_street_key == ultimo_mano_street_key and (time.time() - tracker.hero_just_acted_ts < 2.5):
+                        # Prevención de duplicados / Debounce:
+                        # 1. Si acabamos de actuar hace <2.5s
+                        # 2. O si estamos en el mismo contexto de apuesta exacto que la última acción ejecutada y han pasado <5.0s
+                        if es_mi_turno and (
+                            (time.time() - tracker.hero_just_acted_ts < 2.5)
+                            or (
+                                getattr(tracker, "hero_last_action_context", None) is not None
+                                and current_action_context == tracker.hero_last_action_context
+                                and (time.time() - tracker.hero_just_acted_ts < 5.0)
+                            )
+                        ):
                             es_mi_turno = False
 
                         # Guardia anti-turnos huérfanos: si no hay cartas de Hero ni botones de acción,
@@ -2672,6 +2674,32 @@ def main():
                         if es_mi_turno and not mis_cartas and not botones:
                             es_mi_turno = False
                             tracker.http_turn_signal = False
+
+                        # Guardia Anti-Ceguera: Espera reactiva de asentamiento de cartas si es nuestro turno pero mis_cartas está vacío
+                        if es_mi_turno and not mis_cartas:
+                            for _ in range(9):  # Hasta 450ms (9 x 50ms)
+                                time.sleep(0.05)
+                                if tracker.my_cards:
+                                    mis_cartas = formatear_cartas_canonicas(tracker.my_cards)
+                                    dom_data["mis_cartas"] = mis_cartas
+                                    break
+                                try:
+                                    fresh_dom = target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or {}
+                                    if fresh_dom.get("mis_cartas"):
+                                        mis_cartas = formatear_cartas_canonicas(fresh_dom["mis_cartas"])
+                                        dom_data["mis_cartas"] = mis_cartas
+                                        break
+                                except Exception:
+                                    pass
+
+                            # Si tras la espera reactiva aún no hay cartas, NUNCA actuar ni consultar a ciegas
+                            if not mis_cartas:
+                                print("⚠️ [ANTI-CEGUERA] Turno detectado sin cartas privadas tras 450ms. Omitiendo acción a ciegas...")
+                                es_mi_turno = False
+                                tracker.http_turn_signal = False
+
+                        turno_id_actual = f"{mis_cartas}|{comunitarias}|{bote}|{botones}"
+                        turno_street_key = (tracker.hand_number, tracker.current_street, mis_cartas, comunitarias)
 
                         # CASO 1: ES NUESTRO TURNO Y AÚN NO HEMOS CONSULTADO A GEMINI PARA ESTE TURNO
                         if es_mi_turno and turno_id_actual != ultimo_turno_id:
@@ -2755,6 +2783,8 @@ def main():
                             print(f"⚡ [DECISIÓN IA ({dt:.2f}s)]: {decision.accion} | Confianza: {decision.confianza:.2f} | {decision.evaluacion}")
 
                             accion_ejecutada = ejecutar_accion(target_mesa, decision, dom_data=dom_data)
+                            tracker.hero_just_acted_ts = time.time()
+                            tracker.hero_last_action_context = (tracker.hand_number, tracker.current_street, float(dom_data.get('a_igualar') or 0.0))
                             log_json_estructurado(
                                 "decision",
                                 hand_id=f"hand_{tracker.hand_number}",

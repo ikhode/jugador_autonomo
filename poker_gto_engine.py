@@ -100,6 +100,31 @@ def parsear_carta(carta_raw: str) -> Tuple[str, str]:
     return rango, palo
 
 
+PALOS_UNICODE: Dict[str, str] = {"S": "♠", "H": "♥", "D": "♦", "C": "♣"}
+
+
+def formatear_carta_canonica(carta_raw: str) -> str:
+    """Normaliza cualquier carta (ej. 'SJ', 'J♠', '10S', 'H10', 'D2') a formato canónico 'J♠', '10♠', '2♦'."""
+    r, s = parsear_carta(carta_raw)
+    if not r or not s:
+        return ""
+    rank_str = "10" if r == "T" else r
+    suit_str = PALOS_UNICODE.get(s, s)
+    return f"{rank_str}{suit_str}"
+
+
+def formatear_cartas_canonicas(cartas: Any) -> str:
+    """Convierte listas o cadenas de cartas (ej. ['SJ', 'H6'], 'H5 D2 H9') a formato canónico 'J♠ 6♥', '5♥ 2♦ 9♥'."""
+    if not cartas:
+        return ""
+    if isinstance(cartas, list):
+        items = cartas
+    else:
+        items = str(cartas).replace(",", " ").split()
+    res = [formatear_carta_canonica(c) for c in items]
+    return " ".join([c for c in res if c])
+
+
 def parsear_lista_cartas(cartas_str: str) -> List[Tuple[str, str]]:
     if not cartas_str:
         return []
