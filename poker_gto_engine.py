@@ -118,13 +118,29 @@ def clasificar_mano_preflop(mis_cartas_str: str) -> Dict[str, Any]:
         if v2 >= 10:
             tier, score = "A", (82 if es_suited else 78)
         elif es_suited:
+            tier, score = "B", 74
+        else:
+            tier, score = "B" if v2 >= 9 else "C", (68 if v2 >= 9 else 60)
+    elif v1 == 12:  # Reina (Q)
+        if v2 >= 11:  # QJ
+            tier, score = "A" if es_suited else "B", 82 if es_suited else 76
+        elif v2 == 10:  # QT
+            tier, score = "B", 76 if es_suited else 70
+        elif es_suited:
+            tier, score = "B", 72
+        else:
+            tier, score = "C", 62
+    elif v1 == 11:  # Jota (J)
+        if v2 >= 10:  # JT
+            tier, score = "A" if es_suited else "B", 80 if es_suited else 74
+        elif es_suited:
             tier, score = "B", 72
         else:
             tier, score = "C", 60
-    elif es_suited and (v1 - v2 == 1) and v2 >= 5:
+    elif es_suited and (v1 - v2 in (1, 2)) and v2 >= 4:
         tier, score = "B", 70
     elif v1 >= 10 and v2 >= 9:
-        tier, score = "C", 64
+        tier, score = "B" if es_suited else "C", 68 if es_suited else 64
     else:
         tier, score = "BASURA", 30
 

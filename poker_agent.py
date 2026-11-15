@@ -247,6 +247,15 @@ class PokerAgent:
                     print(f"⚠️ Modelo {model_name} no disponible ({type(e).__name__}), probando respaldo...")
                 continue
 
+        # Si fallaron o se agotó la cuota en los modelos en la nube de Gemini, intentar inferencia local Gemma 4B si está configurada
+        try:
+            prompt_local = f"Mesa de póker: {dom_data}. Responde en JSON con la acción (FOLD, CHECK, CALL, RAISE, ALL_IN), evaluacion y confianza."
+            dec_local = consultar_gemma_local(prompt_local, dom_data=dom_data)
+            if dec_local:
+                return dec_local
+        except Exception:
+            pass
+
         return PokerDecision(
             evaluacion="Respuesta rápida de fallback por timeout o API ocupada",
             estrategia_competitiva="Fallback por velocidad de API",

@@ -795,25 +795,33 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
         elif accion == "CALL":
             if intentar_click(target, btn_call, "Botón Call", timeout=2000):
                 accion_ejecutada = "CALL"
-            elif clicar_texto_modal_universal(target, ["Call", "Igualar", "Pagar"], "Botón Call (Texto)"):
+            elif clicar_texto_modal_universal(target, ["Call", "Igualar", "Pagar", "All-in", "Allin"], "Botón Call (Texto)"):
                 accion_ejecutada = "CALL"
             elif intentar_click(target, btn_check, "Botón Check (Fallback Call)", timeout=1500):
                 accion_ejecutada = "CHECK"
+            elif intentar_click(target, btn_allin, "Botón All-in (Fallback Call)", timeout=1500):
+                accion_ejecutada = "ALL_IN"
             else:
                 respaldo = decidir_accion_rapida(dom_data or {})
-                if respaldo.accion in ("RAISE", "CALL", "CHECK") or (dom_data or {}).get("gto_preflop", {}).get("tier") in ("S", "A", "B"):
+                tier_pre = (dom_data or {}).get("gto_preflop", {}).get("tier", "DESCONOCIDO")
+                if respaldo.accion in ("RAISE", "CALL", "CHECK") or tier_pre in ("S", "A", "B"):
                     print("⚠️ Call/Check no disponible aún pero la mano es jugable/fuerte -> Evitando Fold accidental...")
                     time.sleep(0.3)
                     if intentar_click(target, btn_call, "Botón Call (Reintento)", timeout=1000):
                         accion_ejecutada = "CALL"
+                    elif clicar_texto_modal_universal(target, ["Call", "Igualar", "Pagar"], "Botón Call (Texto Reintento)"):
+                        accion_ejecutada = "CALL"
                     elif intentar_click(target, btn_check, "Botón Check (Reintento)", timeout=1000):
                         accion_ejecutada = "CHECK"
                     else:
-                        accion_ejecutada = "WAIT"
+                        print("🛡️ Manteniendo postura defensiva CALL sin tirar la mano...")
+                        accion_ejecutada = "CALL"
                 else:
                     print("⚠️ Call no disponible. Intentando Fold seguro...")
-                    intentar_click(target, btn_fold, "Botón Fold (Fallback)", timeout=1500)
-                    accion_ejecutada = "FOLD"
+                    if intentar_click(target, btn_fold, "Botón Fold (Fallback)", timeout=1500):
+                        accion_ejecutada = "FOLD"
+                    else:
+                        accion_ejecutada = "FOLD"
 
         elif accion == "RAISE":
             monto = getattr(decision, "monto_apuesta", 0) or getattr(decision, "monto", 0) or 0
@@ -840,6 +848,8 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
         elif accion in ("ALL_IN", "ALLIN"):
             if intentar_click(target, btn_allin, "Botón All-in", timeout=2000):
                 accion_ejecutada = "ALL_IN"
+            elif clicar_texto_modal_universal(target, ["All-in", "Allin", "Todo adentro"], "Botón All-in (Texto)"):
+                accion_ejecutada = "ALL_IN"
             elif intentar_click(target, btn_raise, "Botón Raise (Fallback All-in)", timeout=2000):
                 accion_ejecutada = "RAISE"
             else:
@@ -849,9 +859,10 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
         elif accion == "WAIT":
             accion_ejecutada = "WAIT"
             try:
-                if target.evaluate("() => document.body ? document.body.textContent.includes('Se ha terminado tu tiempo') : false"):
-                    print("⚠️ Detectado modo Sit-out. Intentando reactivar...")
-                    intentar_click(target, "#general-popup-button-action-OK", "Botón Aceptar Sit-out", timeout=2000)
+                # Evitar hacer clic en Sit-out si hay partida activa
+                if target.evaluate("() => document.body ? document.body.textContent.includes('Se ha terminado tu tiempo') : false") and not es_mesa_activa_o_turno(target):
+                    print("⚠️ Detectado modo Sit-out fuera de partida active. Intentando reactivar...")
+                    intentar_click(target, config.SELECTORS.get("btn_sitout", "#general-popup-button-action-OK"), "Botón Aceptar Sit-out", timeout=2000)
             except Exception:
                 pass
 
@@ -896,22 +907,20 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
     pareja_solo_en_mesa = bool(gto_comb.get('pareja_en_mesa')) and not es_pareja_mano and not coincidencias and not es_color and not es_escalera
     es_preflop = not bool((dom_data.get('cartas_comunitarias') or '').strip())
 
-    patrones_fuertes = ['doble pareja', 'trío', 'trio', 'escalera', 'color', 'full', 'póker', 'poker', 'escalera real']
-    if not pareja_solo_en_mesa:
-        patrones_fuertes.append('pareja')
+    subtipo_comb = str(gto_comb.get('categoria', ''))
+    es_top_pair = "Top Pair" in subtipo_comb or "Overpair" in subtipo_comb
 
-    fuerza_eval = fuerza_lower
-    if pareja_solo_en_mesa and 'pareja' in fuerza_eval and not any(p in fuerza_eval for p in ['doble pareja', 'trío', 'trio', 'full']):
-        fuerza_eval = fuerza_eval.replace('pareja', '')
+    patrones_monstruo = ['doble pareja', 'trío', 'trio', 'escalera', 'color', 'full', 'póker', 'poker', 'escalera real']
 
     es_mano_fuerte = (
-        any(p in fuerza_eval for p in patrones_fuertes)
-        or es_pareja_mano
-        or coincidencias
+        any(p in fuerza_lower for p in patrones_monstruo)
+        or (es_pareja_mano and (es_preflop or es_top_pair))
+        or (coincidencias and es_top_pair)
         or es_color
         or es_escalera
         or (es_preflop and tier in ('S', 'A'))
     )
+
     es_mano_jugable = (
         (es_preflop and tier in ('S', 'A', 'B'))
         or ('proyecto' in fuerza_lower)
@@ -923,6 +932,7 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
 
     desc_mano = (gto_comb.get('categoria') if not es_preflop and gto_comb.get('categoria') != 'CARTA ALTA PRIVADA' else None) or fuerza or gto_pre.get('mano_code') or cartas
 
+    # 1. Manos fuertes por valor
     if es_mano_fuerte:
         if hay_bet:
             return PokerDecision(
@@ -955,6 +965,7 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
                 confianza=0.92
             )
 
+    # 2. Pase gratis (Check prioritario)
     if hay_check:
         return PokerDecision(
             evaluacion=f"⚡ [0ms GTO] Pase gratis disponible con mano {desc_mano}.",
@@ -966,17 +977,30 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
             confianza=0.90
         )
 
-    if hay_call and es_mano_jugable and gto_math.get('pot_odds_pct', 0) <= 38:
-        return PokerDecision(
-            evaluacion=f"⚡ [0ms GTO] Rango jugable [{tier}] ({desc_mano}). Pagando call con Pot Odds favorables.",
-            estrategia_competitiva="Defensa de rango en precio correcto",
-            estado_pantalla="EN_MESA_JUEGO",
-            es_mi_turno=True,
-            accion="CALL",
-            monto_apuesta=0,
-            confianza=0.85
-        )
+    # 3. Defensa activa en Preflop y Postflop para manos jugables (evita Overfold)
+    if hay_call:
+        if es_preflop and tier in ('S', 'A', 'B'):
+            return PokerDecision(
+                evaluacion=f"⚡ [0ms GTO] Rango jugable Preflop [{tier}] ({desc_mano}). Defendiendo inversión con Call.",
+                estrategia_competitiva="Defensa de rango preflop",
+                estado_pantalla="EN_MESA_JUEGO",
+                es_mi_turno=True,
+                accion="CALL",
+                monto_apuesta=0,
+                confianza=0.88
+            )
+        elif es_mano_jugable and (gto_math.get('pot_odds_pct', 0) <= 46 or "Top Pair" in subtipo_comb or "Middle" in subtipo_comb):
+            return PokerDecision(
+                evaluacion=f"⚡ [0ms GTO] Mano jugable [{tier}] ({desc_mano}). Pagando call con Pot Odds razonables.",
+                estrategia_competitiva="Defensa de rango en precio correcto",
+                estado_pantalla="EN_MESA_JUEGO",
+                es_mi_turno=True,
+                accion="CALL",
+                monto_apuesta=0,
+                confianza=0.85
+            )
 
+    # 4. Fold defensivo solo para manos débiles fuera de rango
     if hay_call:
         return PokerDecision(
             evaluacion=f"⚡ [0ms GTO] Mano débil [{tier}] ({desc_mano}). Fold para proteger stack.",
@@ -988,7 +1012,7 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
             confianza=0.88
         )
 
-    accion_fallback = "CHECK" if hay_check else ("FOLD" if "FOLD" in botones else "CALL")
+    accion_fallback = "CHECK" if hay_check else ("CALL" if hay_call or es_mano_jugable else ("FOLD" if "FOLD" in botones else "CALL"))
     return PokerDecision(
         evaluacion=f"⚡ [0ms GTO] Acción rápida fallback: {accion_fallback}",
         estrategia_competitiva="Acción defensiva automática",

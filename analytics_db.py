@@ -560,8 +560,8 @@ class AnalyticsStorage:
                 """
                 INSERT INTO analytics_sessions (
                     session_id, version_id, started_at, mode, is_synthetic, code_hash, model_name,
-                    initial_bankroll, final_bankroll, buy_in_total, big_blind, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
+                    initial_bankroll, final_bankroll, buy_in_total, big_blind, hands_played, net_profit_chips, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0.0, 'ACTIVE')
                 ON CONFLICT(session_id) DO UPDATE SET
                     is_synthetic = excluded.is_synthetic,
                     code_hash = excluded.code_hash

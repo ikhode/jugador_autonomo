@@ -248,7 +248,14 @@ class TestStorageConcurrencyAndTelemetry(unittest.TestCase):
         self.storage = AnalyticsStorage(db_path=self.db_path)
 
     def tearDown(self):
-        self.tmp_dir.cleanup()
+        try:
+            self.storage.close()
+        except Exception:
+            pass
+        try:
+            self.tmp_dir.cleanup()
+        except Exception:
+            pass
 
     def test_executed_action_vs_intended_action_and_deduplication(self):
         logger = PokerAnalyticsLogger(
