@@ -392,6 +392,9 @@ def _sanitizar_json_decision(raw_text: str) -> str:
             data["estado_pantalla"] = "EN_MESA_JUEGO"
             data["es_mi_turno"] = True
 
+            data["evaluacion"] = str(data.get("evaluacion") if data.get("evaluacion") is not None else "Análisis táctico en mesa")
+            data["estrategia_competitiva"] = str(data.get("estrategia_competitiva") if data.get("estrategia_competitiva") is not None else "Plan competitivo")
+
             m_raw = str(data.get("monto_apuesta") or "0")
             nums = re.findall(r"\d+", m_raw)
             data["monto_apuesta"] = int(nums[0]) if nums else 0
