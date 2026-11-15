@@ -2,31 +2,20 @@
 Módulo Perfilador de Oponentes Explotativo (Poker HUD Database).
 Almacena y calcula estadísticas en tiempo real por cada oponente (VPIP, PFR, Agresión, Folds a Raise).
 """
-import sqlite3
 from pathlib import Path
 from typing import Dict, Any
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from db_models import Base, Oponente
 
 DB_PATH = Path("logs/poker_stats.db")
+engine = create_engine(f"sqlite:///{DB_PATH}")
+SessionLocal = sessionmaker(bind=engine)
 
 
 def inicializar_db():
     DB_PATH.parent.mkdir(exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS oponentes (
-                player_id TEXT PRIMARY KEY,
-                nickname TEXT,
-                manos_jugadas INTEGER DEFAULT 0,
-                preflop_calls INTEGER DEFAULT 0,
-                preflop_raises INTEGER DEFAULT 0,
-                folds_ante_raise INTEGER DEFAULT 0,
-                postflop_bets INTEGER DEFAULT 0,
-                postflop_checks INTEGER DEFAULT 0,
-                ultimas_cartas_mostradas TEXT,
-                ultima_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
+    Base.metadata.create_all(engine)
 
 
 inicializar_db()
@@ -42,68 +31,85 @@ class OpponentProfiler:
         target_id = str(player_id or nickname)
         nick = nickname or target_id
 
-        with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT manos_jugadas FROM oponentes WHERE player_id = ?", (target_id,))
-            row = cursor.fetchone()
-            if not row:
-                cursor.execute("""
-                    INSERT INTO oponentes (player_id, nickname, manos_jugadas)
-                    VALUES (?, ?, 1)
-                """, (target_id, nick))
+        session = SessionLocal()
+        try:
+            oponente = session.query(Oponente).filter(Oponente.player_id == target_id).first()
+            if not oponente:
+                oponente = Oponente(
+                    player_id=target_id,
+                    nickname=nick,
+                    manos_jugadas=1,
+                    preflop_calls=0,
+                    preflop_raises=0,
+                    folds_ante_raise=0,
+                    postflop_bets=0,
+                    postflop_checks=0
+                )
+                session.add(oponente)
             elif nickname:
-                cursor.execute("UPDATE oponentes SET nickname = ?, ultima_actualizacion = CURRENT_TIMESTAMP WHERE player_id = ?", (nickname, target_id))
+                oponente.nickname = nickname
 
             accion_upper = accion.upper()
             calle_upper = (calle or "PREFLOP").upper()
 
             if calle_upper == "PREFLOP":
                 if any(k in accion_upper for k in ("RAISE", "BET", "ALLIN", "ALL_IN")):
-                    cursor.execute("UPDATE oponentes SET preflop_raises = preflop_raises + 1 WHERE player_id = ?", (target_id,))
+                    oponente.preflop_raises = (oponente.preflop_raises or 0) + 1
                 elif "CALL" in accion_upper:
-                    cursor.execute("UPDATE oponentes SET preflop_calls = preflop_calls + 1 WHERE player_id = ?", (target_id,))
+                    oponente.preflop_calls = (oponente.preflop_calls or 0) + 1
                 elif "FOLD" in accion_upper:
-                    cursor.execute("UPDATE oponentes SET folds_ante_raise = folds_ante_raise + 1 WHERE player_id = ?", (target_id,))
+                    oponente.folds_ante_raise = (oponente.folds_ante_raise or 0) + 1
             else:  # POSTFLOP
                 if any(k in accion_upper for k in ("RAISE", "BET", "ALLIN", "ALL_IN")):
-                    cursor.execute("UPDATE oponentes SET postflop_bets = postflop_bets + 1 WHERE player_id = ?", (target_id,))
+                    oponente.postflop_bets = (oponente.postflop_bets or 0) + 1
                 elif "CHECK" in accion_upper or "CALL" in accion_upper:
-                    cursor.execute("UPDATE oponentes SET postflop_checks = postflop_checks + 1 WHERE player_id = ?", (target_id,))
+                    oponente.postflop_checks = (oponente.postflop_checks or 0) + 1
                 elif "FOLD" in accion_upper:
-                    cursor.execute("UPDATE oponentes SET folds_ante_raise = folds_ante_raise + 1 WHERE player_id = ?", (target_id,))
+                    oponente.folds_ante_raise = (oponente.folds_ante_raise or 0) + 1
 
-            conn.commit()
+            session.commit()
+        finally:
+            session.close()
 
     def incrementar_manos_rival(self, player_id: str, nickname: str = ""):
         if not player_id and not nickname:
             return
         target_id = str(player_id or nickname)
         nick = nickname or target_id
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("""
-                INSERT INTO oponentes (player_id, nickname, manos_jugadas)
-                VALUES (?, ?, 1)
-                ON CONFLICT(player_id) DO UPDATE SET
-                    nickname = COALESCE(NULLIF(excluded.nickname, ''), oponentes.nickname),
-                    manos_jugadas = oponentes.manos_jugadas + 1,
-                    ultima_actualizacion = CURRENT_TIMESTAMP
-            """, (target_id, nick))
-            conn.commit()
+
+        session = SessionLocal()
+        try:
+            oponente = session.query(Oponente).filter(Oponente.player_id == target_id).first()
+            if not oponente:
+                oponente = Oponente(player_id=target_id, nickname=nick, manos_jugadas=1)
+                session.add(oponente)
+            else:
+                if nick:
+                    oponente.nickname = nick
+                oponente.manos_jugadas = (oponente.manos_jugadas or 0) + 1
+            session.commit()
+        finally:
+            session.close()
 
     def registrar_showdown(self, player_id: str, nickname: str, cartas_mostradas: str):
         if not player_id and not nickname:
             return
         target_id = str(player_id or nickname)
         nick = nickname or target_id
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("""
-                INSERT INTO oponentes (player_id, nickname, ultimas_cartas_mostradas)
-                VALUES (?, ?, ?)
-                ON CONFLICT(player_id) DO UPDATE SET
-                    ultimas_cartas_mostradas = excluded.ultimas_cartas_mostradas,
-                    ultima_actualizacion = CURRENT_TIMESTAMP
-            """, (target_id, nick, str(cartas_mostradas)))
-            conn.commit()
+
+        session = SessionLocal()
+        try:
+            oponente = session.query(Oponente).filter(Oponente.player_id == target_id).first()
+            if not oponente:
+                oponente = Oponente(player_id=target_id, nickname=nick, ultimas_cartas_mostradas=str(cartas_mostradas))
+                session.add(oponente)
+            else:
+                if nick:
+                    oponente.nickname = nick
+                oponente.ultimas_cartas_mostradas = str(cartas_mostradas)
+            session.commit()
+        finally:
+            session.close()
 
     def obtener_perfil_explotativo(self, player_id: str, nickname: str = "") -> Dict[str, Any]:
         if not player_id and not nickname:
@@ -117,26 +123,34 @@ class OpponentProfiler:
             }
 
         target_id = str(player_id or nickname)
-        with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT manos_jugadas, preflop_calls, preflop_raises, folds_ante_raise, postflop_bets, postflop_checks, nickname, ultimas_cartas_mostradas
-                FROM oponentes WHERE player_id = ? OR (nickname != '' AND nickname = ?)
-            """, (target_id, nickname))
-            row = cursor.fetchone()
+        session = SessionLocal()
+        try:
+            oponente = session.query(Oponente).filter(
+                (Oponente.player_id == target_id) |
+                ((Oponente.nickname != '') & (Oponente.nickname == nickname))
+            ).first()
 
-        if not row:
-            return {
-                "nickname": nickname or target_id,
-                "manos": 0,
-                "estilo": "JUGADOR NUEVO (Sin historial)",
-                "vpip_pct": 30,
-                "pfr_pct": 15,
-                "agresividad": 1.0,
-                "recomendacion_tactica": "Oponente nuevo. Aplicar estrategia GTO estándar y observar tendencias iniciales."
-            }
+            if not oponente:
+                return {
+                    "nickname": nickname or target_id,
+                    "manos": 0,
+                    "estilo": "JUGADOR NUEVO (Sin historial)",
+                    "vpip_pct": 30,
+                    "pfr_pct": 15,
+                    "agresividad": 1.0,
+                    "recomendacion_tactica": "Oponente nuevo. Aplicar estrategia GTO estándar y observar tendencias iniciales."
+                }
 
-        manos, calls, raises, folds, bets, checks, nick, ultimas_cartas = row
+            manos = oponente.manos_jugadas or 0
+            calls = oponente.preflop_calls or 0
+            raises = oponente.preflop_raises or 0
+            folds = oponente.folds_ante_raise or 0
+            bets = oponente.postflop_bets or 0
+            checks = oponente.postflop_checks or 0
+            nick = oponente.nickname
+            ultimas_cartas = oponente.ultimas_cartas_mostradas
+        finally:
+            session.close()
         total_acciones_preflop = calls + raises + folds
         manos_efectivas = max(manos, total_acciones_preflop)
 

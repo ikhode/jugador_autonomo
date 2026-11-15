@@ -14,8 +14,11 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from sqlalchemy import create_engine
+from db_models import Base
 
 DB_PATH = Path("logs/poker_stats.db")
+analytics_engine = create_engine(f"sqlite:///{DB_PATH}")
 
 PROJECT_CORE_FILES = [
     "config.py",
@@ -73,6 +76,10 @@ def inicializar_esquema_analiticas(db_path: Path = DB_PATH) -> None:
     Inicializa y migra todas las tablas necesarias para el sistema avanzado de analíticas,
     conservando intacta la tabla `oponentes` existente.
     """
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    Base.metadata.create_all(analytics_engine)
+
     with get_connection(db_path) as conn:
         # 1. Tabla de oponentes (compatibilidad con opponents_profiler.py)
         conn.execute("""
