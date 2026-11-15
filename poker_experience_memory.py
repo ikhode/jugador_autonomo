@@ -18,9 +18,24 @@ def inicializar_db_memoria():
 
 inicializar_db_memoria()
 
+def _construir_similarity_key(hand_tier: str, board_texture: str, opp_archetype: str) -> str:
+    tier_tok = (hand_tier or "DESCONOCIDO").strip().upper()
+    board_tok = ((board_texture or "DESCONOCIDA").strip().split()[0]).upper()
+    opp_tok = ((opp_archetype or "DESCONOCIDO").strip().split()[0]).upper()
+    return f"{tier_tok}|{board_tok}|{opp_tok}"
+
+
 class PokerExperienceMemory:
-    def __init__(self):
-        inicializar_db_memoria()
+    def __init__(self, db_path: Optional[Path] = None):
+        if db_path is not None:
+            db_path = Path(db_path)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            eng = create_engine(f"sqlite:///{db_path}")
+            Base.metadata.create_all(eng)
+            self._session_factory = sessionmaker(bind=eng)
+        else:
+            inicializar_db_memoria()
+            self._session_factory = SessionLocal
 
     def registrar_error_pasado(
         self,
@@ -31,8 +46,8 @@ class PokerExperienceMemory:
         loss_amount: int,
         lesson_learned: str
     ):
-        similarity_key = f"{hand_tier.upper()}|{board_texture.split()[0].upper()}|{opp_archetype.split()[0].upper()}"
-        session = SessionLocal()
+        similarity_key = _construir_similarity_key(hand_tier, board_texture, opp_archetype)
+        session = self._session_factory()
         try:
             nuevo_error = ErrorExperiencia(
                 hand_tier=hand_tier,
@@ -83,11 +98,16 @@ class PokerExperienceMemory:
         opp_archetype: str,
         limit: int = 2
     ) -> List[Dict[str, Any]]:
-        session = SessionLocal()
+        similarity_key = _construir_similarity_key(hand_tier, board_texture, opp_archetype)
+        session = self._session_factory()
         try:
             results = session.query(ErrorExperiencia).filter(
-                (ErrorExperiencia.hand_tier.ilike(f"%{hand_tier}%")) |
-                (ErrorExperiencia.opp_archetype.ilike(f"%{opp_archetype.split()[0]}%"))
+                (ErrorExperiencia.similarity_key == similarity_key) |
+                (
+                    (ErrorExperiencia.hand_tier == hand_tier) &
+                    (ErrorExperiencia.board_texture == board_texture) &
+                    (ErrorExperiencia.opp_archetype == opp_archetype)
+                )
             ).order_by(ErrorExperiencia.loss_amount.desc(), ErrorExperiencia.id.desc()).limit(limit).all()
 
             return [{
@@ -96,7 +116,8 @@ class PokerExperienceMemory:
                 "opp_archetype": r.opp_archetype,
                 "action_taken": r.action_taken,
                 "loss_amount": r.loss_amount,
-                "lesson_learned": r.lesson_learned
+                "lesson_learned": r.lesson_learned,
+                "similarity_key": r.similarity_key,
             } for r in results]
         finally:
             session.close()

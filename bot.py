@@ -46,6 +46,11 @@ class GameTracker:
         self.current_street = "PREFLOP"
         self.current_round_no = 1
         self.hero_just_acted_ts = 0.0
+        self.last_hand_tier = "DESCONOCIDO"
+        self.last_board_texture = "DESCONOCIDA"
+        self.last_opp_archetype = "Desconocido"
+        self.last_action_taken = "WAIT"
+        self.last_hand_net_chips = 0.0
 
     def registrar_evento(self, tipo: str, detalle: str):
         timestamp = time.strftime('%H:%M:%S')
@@ -72,6 +77,23 @@ class GameTracker:
             except Exception:
                 pass
 
+        res_lower = (resultado_str or "").lower()
+        net_chips = float(self.last_hand_net_chips or 0.0)
+        if net_chips >= 0 and any(k in res_lower for k in ("perdid", "lost", "derrota", "eliminad")):
+            net_chips = -float(self.last_pot or getattr(config, "BIG_BLIND_DEFAULT", 20.0))
+
+        if net_chips < 0 and self.last_action_taken not in ("WAIT", "START_GAME", "REPLAY"):
+            try:
+                experience_memory.auto_evaluar_y_registrar_mano_perdedora(
+                    hand_tier=self.last_hand_tier or "DESCONOCIDO",
+                    board_texture=self.last_board_texture or "DESCONOCIDA",
+                    opp_archetype=self.last_opp_archetype or "Desconocido",
+                    accion_tomada=self.last_action_taken,
+                    net_chips=net_chips,
+                )
+            except Exception:
+                pass
+
         self.hand_number += 1
         self.current_hand_history.clear()
         self.my_cards.clear()
@@ -82,6 +104,11 @@ class GameTracker:
         self.position_name = "DESCONOCIDA"
         self.current_street = "PREFLOP"
         self.current_round_no = 1
+        self.last_hand_tier = "DESCONOCIDO"
+        self.last_board_texture = "DESCONOCIDA"
+        self.last_opp_archetype = "Desconocido"
+        self.last_action_taken = "WAIT"
+        self.last_hand_net_chips = 0.0
 
     def reset_mano(self):
         self.finalizar_mano_actual("Reinicio de mano / Modal")
@@ -93,6 +120,7 @@ class GameTracker:
 
 tracker = GameTracker()
 profiler = OpponentProfiler()
+experience_memory = PokerExperienceMemory()
 
 # JS MutationObserver para reacción instantánea (0ms)
 JS_INICIALIZAR_MUTATION_OBSERVER = r"""() => {
@@ -197,6 +225,17 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
         const stackRival = Array.from(document.querySelectorAll('.player-area:not(.my-player) .player-chips, .player-area:not(.my-player) .chips-amount, .player-area:not(.my-player) .stack-amount, .player-area:not(.my-player) .player-balance'))
             .map(el => el.innerText.trim()).filter(Boolean).join(' | ') || '0';
 
+        const jugadoresMesa = Array.from(document.querySelectorAll('.player-area:not(.my-player)')).map((area, idx) => {
+            const nick = (area.querySelector('.player-name, .nickname, .username')?.innerText || `Rival_${idx + 1}`).trim();
+            const stackTxt = (area.querySelector('.player-chips, .chips-amount, .stack-amount, .player-balance')?.innerText || '0').trim();
+            const cls = (area.className || '').toLowerCase();
+            const txtArea = (area.innerText || '').toLowerCase();
+            const isFold = cls.includes('fold') || txtArea.includes('fold') || txtArea.includes('retir');
+            const isEmpty = txtArea.includes('vacío') || txtArea.includes('empty');
+            const estado = isEmpty ? 'VACIO' : (isFold ? 'FOLD' : 'ACTIVO');
+            return { asiento: idx + 1, nickname: nick, stack: stackTxt, estado };
+        }).filter(j => j.estado !== 'VACIO');
+
         const btnCallEl = accionesArea ? accionesArea.querySelector('#CALL, .action-call') : null;
         const callVal = (btnCallEl?.querySelector('.action-value')?.innerText || '').trim();
         const aIgualar = callVal || apuestasRivales || '0';
@@ -246,7 +285,8 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             modales_visibles: modales.join(' | '),
             es_mi_turno: esMiTurno,
             tiempo_restante: timerTexto,
-            apuestas_rivales: apuestasRivales
+            apuestas_rivales: apuestasRivales,
+            jugadores_mesa: jugadoresMesa
         };
     } catch(e) {
         return null;
@@ -266,7 +306,8 @@ def intentar_click(target, selector: str, descripcion: str, timeout: int = 4000)
         try:
             elem = target.locator(sel).first
             if elem.is_visible():
-                elem.click(force=True, timeout=1200)
+                elem.wait_for(state="visible", timeout=500)
+                elem.click(timeout=1200)
                 print(f"✅ [CLIC OK] Clic en {descripcion} realizado.")
                 return True
         except Exception:
@@ -278,12 +319,12 @@ def intentar_click(target, selector: str, descripcion: str, timeout: int = 4000)
     timeout_por_sel = max(300, int(timeout / max(1, len(selectores))))
     for sel in selectores:
         try:
-            target.wait_for_selector(sel, state="attached", timeout=timeout_por_sel)
+            target.wait_for_selector(sel, state="visible", timeout=timeout_por_sel)
 
             try:
                 elem = target.locator(sel).first
                 if elem.is_visible():
-                    elem.click(force=True, timeout=1200)
+                    elem.click(timeout=1200)
                     print(f"✅ [CLIC OK] Clic en {descripcion} realizado.")
                     return True
             except Exception:
@@ -310,6 +351,271 @@ def intentar_click(target, selector: str, descripcion: str, timeout: int = 4000)
         except Exception:
             continue
     return False
+
+
+def verificar_accion_reflejada(target, accion: str, timeout_ms: int = 700) -> bool:
+    """Verifica tras un clic que el turno o los botones de acción hayan cambiado en el DOM."""
+    if accion not in ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN"):
+        return True
+    try:
+        target.wait_for_function(
+            """() => {
+                const btns = Array.from(document.querySelectorAll('.actions-area .action-button, .actions-area #FOLD, .actions-area #CHECK, .actions-area #CALL, .actions-area #BET, .actions-area #RAISE'));
+                return !btns.some(b => b.offsetWidth > 0 || b.offsetHeight > 0);
+            }""",
+            timeout=timeout_ms,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _parse_num_dom(valor: Any, default: float = 0.0) -> float:
+    if valor is None:
+        return default
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    limpio = re.sub(r"[^\d.]", "", str(valor).replace(",", ""))
+    if not limpio:
+        return default
+    try:
+        return float(limpio)
+    except Exception:
+        return default
+
+
+def es_mesa_dinero_real(dom_data: Optional[dict], url: str = "") -> bool:
+    """Devuelve True si se detectan indicadores de mesa con dinero real (cuando PLAY_MONEY_ONLY está activo)."""
+    if not getattr(config, "PLAY_MONEY_ONLY", True):
+        return False
+    dom_data = dom_data or {}
+    campos = [
+        str(url or ""),
+        str(dom_data.get("bote", "")),
+        str(dom_data.get("mi_stack", "")),
+        str(dom_data.get("stack_rival", "")),
+        str(dom_data.get("a_igualar", "")),
+        str(dom_data.get("moneda", "")),
+        str(dom_data.get("modales_visibles", "")),
+    ]
+    texto = " ".join(campos)
+    texto_upper = texto.upper()
+    if any(pm in texto_upper for pm in ("PLAY MONEY", "PLAY_MONEY", "FICHAS", "FUN MONEY", "PRACTICE")):
+        return False
+    if any(sym in texto for sym in ("€", "$", "£")):
+        return True
+    if re.search(r"\b(USD|EUR|GBP|MXN|REAL\s*MONEY|DINERO\s*REAL)\b", texto_upper):
+        return True
+    return False
+
+
+def validar_accion(accion: str, monto: Any, estado_dom: Optional[dict]) -> Tuple[str, int, Optional[str]]:
+    """
+    Valida y normaliza una decisión contra las acciones legales disponibles en el DOM.
+    Es el único punto de autorización antes de ejecutar clics en mesa.
+    Devuelve (accion_legal, monto_legal, motivo_correccion_o_None).
+    """
+    dom = estado_dom or {}
+    accion_norm = (accion or "WAIT").strip().upper()
+    if accion_norm == "ALLIN":
+        accion_norm = "ALL_IN"
+
+    botones = str(dom.get("botones_visibles") or dom.get("opciones_disponibles") or "").upper()
+    a_igualar = _parse_num_dom(dom.get("a_igualar"), 0.0)
+    mi_stack = _parse_num_dom(dom.get("mi_stack"), 0.0)
+    big_blind = _parse_num_dom(dom.get("big_blind"), float(getattr(config, "BIG_BLIND_DEFAULT", 20.0)))
+    if big_blind <= 0:
+        big_blind = float(getattr(config, "BIG_BLIND_DEFAULT", 20.0))
+
+    min_raise = _parse_num_dom(dom.get("min_raise"), 0.0)
+    if min_raise <= 0:
+        min_raise = max(2.0 * big_blind, 2.0 * a_igualar) if a_igualar > 0 else big_blind
+
+    hay_check = "CHECK" in botones
+    hay_call = "CALL" in botones
+    hay_raise = ("RAISE" in botones) or ("BET" in botones)
+    hay_allin = ("ALL_IN" in botones) or ("ALLIN" in botones)
+    hay_fold = "FOLD" in botones
+    es_mano_activa = bool(dom.get("es_mi_turno") or str(dom.get("mis_cartas", "")).strip())
+
+    try:
+        monto_val = float(monto or 0)
+    except Exception:
+        monto_val = 0.0
+
+    # Nunca clicar START_GAME / REPLAY cuando hay mano activa
+    if es_mano_activa and accion_norm in ("START_GAME", "REPLAY"):
+        if hay_check and a_igualar <= 0:
+            return "CHECK", 0, f"Acción ilegal {accion_norm} en mano activa -> CHECK"
+        if hay_call:
+            return "CALL", 0, f"Acción ilegal {accion_norm} en mano activa -> CALL"
+        return "WAIT", 0, f"Acción ilegal {accion_norm} en mano activa -> WAIT"
+
+    if accion_norm in ("WAIT", "START_GAME", "REPLAY"):
+        return accion_norm, 0, None
+
+    # Si hay botones visibles, validar estrictamente la legalidad
+    if botones:
+        if accion_norm == "FOLD":
+            if hay_check and a_igualar <= 0:
+                return "CHECK", 0, "FOLD innecesario con CHECK gratis -> CHECK"
+            if hay_fold:
+                return "FOLD", 0, None
+            if hay_check:
+                return "CHECK", 0, "FOLD no disponible -> CHECK"
+            if hay_call:
+                return "CALL", 0, "FOLD no disponible -> CALL"
+            if hay_allin:
+                return "ALL_IN", 0, "FOLD no disponible -> ALL_IN"
+            return "WAIT", 0, "FOLD sin botones legales -> WAIT"
+
+        if accion_norm == "CHECK":
+            if hay_check and a_igualar <= 0:
+                return "CHECK", 0, None
+            if hay_call:
+                return "CALL", 0, "CHECK ilegal con apuesta activa -> CALL"
+            if hay_allin:
+                return "ALL_IN", 0, "CHECK ilegal -> ALL_IN"
+            if hay_fold:
+                return "FOLD", 0, "CHECK ilegal -> FOLD"
+            return "WAIT", 0, "CHECK sin botones legales -> WAIT"
+
+        if accion_norm == "CALL":
+            if hay_call:
+                return "CALL", 0, None
+            if hay_check and a_igualar <= 0:
+                return "CHECK", 0, "CALL sin apuesta -> CHECK"
+            if hay_allin:
+                return "ALL_IN", 0, "CALL no disponible -> ALL_IN"
+            if hay_fold:
+                return "FOLD", 0, "CALL no disponible -> FOLD"
+            return "WAIT", 0, "CALL sin botones legales -> WAIT"
+
+        if accion_norm == "RAISE":
+            if hay_raise:
+                monto_clamped = monto_val if monto_val > 0 else min_raise
+                motivo = None
+                if mi_stack > 0:
+                    if min_raise > mi_stack:
+                        monto_clamped = mi_stack
+                        if monto_val != monto_clamped:
+                            motivo = f"Monto RAISE ajustado al stack ({int(round(monto_clamped))})"
+                    else:
+                        if monto_clamped < min_raise:
+                            monto_clamped = min_raise
+                            motivo = f"Monto RAISE bajo mínimo ({int(round(min_raise))})"
+                        elif monto_clamped > mi_stack:
+                            monto_clamped = mi_stack
+                            motivo = f"Monto RAISE excede stack ({int(round(mi_stack))})"
+                else:
+                    if monto_clamped < min_raise:
+                        monto_clamped = min_raise
+                        motivo = f"Monto RAISE bajo mínimo ({int(round(min_raise))})"
+                return "RAISE", int(round(monto_clamped)), motivo
+            if hay_allin:
+                return "ALL_IN", 0, "RAISE no disponible -> ALL_IN"
+            if hay_call:
+                return "CALL", 0, "RAISE no disponible -> CALL"
+            if hay_check and a_igualar <= 0:
+                return "CHECK", 0, "RAISE no disponible -> CHECK"
+            if hay_fold:
+                return "FOLD", 0, "RAISE no disponible -> FOLD"
+            return "WAIT", 0, "RAISE sin botones legales -> WAIT"
+
+        if accion_norm == "ALL_IN":
+            if hay_allin or hay_raise:
+                return "ALL_IN", 0, None
+            if hay_call:
+                return "CALL", 0, "ALL_IN no disponible -> CALL"
+            if hay_check and a_igualar <= 0:
+                return "CHECK", 0, "ALL_IN no disponible -> CHECK"
+            if hay_fold:
+                return "FOLD", 0, "ALL_IN no disponible -> FOLD"
+            return "WAIT", 0, "ALL_IN sin botones legales -> WAIT"
+
+    return accion_norm, int(round(max(0.0, monto_val))), None
+
+
+def actualizar_dom_data_conservando_contexto(
+    dom_data: dict,
+    nuevo_dom: Optional[dict],
+    tracker_obj: Any = None,
+    profiler_obj: Any = None,
+    memory_obj: Any = None,
+) -> dict:
+    """
+    Actualiza dom_data sin perder historial_mano, perfil_rival, perfiles_oponentes ni memoria_errores,
+    y recalcula los campos derivados GTO.
+    """
+    if nuevo_dom:
+        dom_data.update(nuevo_dom)
+
+    if tracker_obj is not None:
+        dom_data["historial_mano"] = tracker_obj.obtener_contexto_completo()
+        mis_cartas = dom_data.get("mis_cartas", "") or " ".join(getattr(tracker_obj, "my_cards", []) or [])
+        if getattr(tracker_obj, "current_street", "PREFLOP") == "PREFLOP":
+            comunitarias = ""
+            if hasattr(tracker_obj, "community_cards"):
+                tracker_obj.community_cards.clear()
+        else:
+            comunitarias = dom_data.get("cartas_comunitarias", "") or " ".join(getattr(tracker_obj, "community_cards", []) or [])
+        if comunitarias and getattr(tracker_obj, "current_street", "PREFLOP") == "PREFLOP":
+            tracker_obj.current_street = "POSTFLOP"
+        bote = dom_data.get("bote", "") or getattr(tracker_obj, "last_pot", 0) or 0
+    else:
+        mis_cartas = dom_data.get("mis_cartas", "")
+        comunitarias = dom_data.get("cartas_comunitarias", "")
+        bote = dom_data.get("bote", 0)
+
+    dom_data["mis_cartas"] = mis_cartas
+    dom_data["cartas_comunitarias"] = comunitarias
+    dom_data["bote"] = bote
+
+    if profiler_obj is not None and tracker_obj is not None:
+        dom_data["perfil_rival"] = profiler_obj.obtener_perfil_explotativo(
+            getattr(tracker_obj, "opp_id", ""),
+            getattr(tracker_obj, "opp_nick", ""),
+        )
+        jugadores = dom_data.get("jugadores_mesa") or []
+        if isinstance(jugadores, list) and jugadores:
+            bb_val = _parse_num_dom(dom_data.get("big_blind"), float(getattr(config, "BIG_BLIND_DEFAULT", 20.0))) or 20.0
+            perfiles_multi = []
+            for j in jugadores:
+                if not isinstance(j, dict):
+                    continue
+                nick_j = j.get("nickname", "")
+                pid_j = j.get("player_id") or nick_j
+                prof_j = dict(profiler_obj.obtener_perfil_explotativo(pid_j, nick_j))
+                stack_chips = _parse_num_dom(j.get("stack"), 0.0)
+                prof_j["asiento"] = j.get("asiento", len(perfiles_multi) + 1)
+                prof_j["estado"] = j.get("estado", "ACTIVO")
+                prof_j["stack"] = stack_chips
+                prof_j["stack_bb"] = round(stack_chips / bb_val, 1) if bb_val > 0 else 0.0
+                perfiles_multi.append(prof_j)
+            if perfiles_multi:
+                dom_data["perfiles_oponentes"] = perfiles_multi
+
+    dom_data["gto_preflop"] = clasificar_mano_preflop(mis_cartas)
+    dom_data["gto_math"] = calcular_pot_odds_y_sizing(bote, dom_data.get("a_igualar"), dom_data.get("mi_stack"))
+    dom_data["gto_textura"] = analizar_textura_mesa_y_blockers(mis_cartas, comunitarias)
+    dom_data["gto_frecuencia"] = generar_frecuencia_mixta_gto()
+    dom_data["gto_combinacion"] = evaluar_combinacion_mano_y_mesa(mis_cartas, comunitarias)
+
+    if memory_obj is not None:
+        tier = dom_data["gto_preflop"].get("tier", "DESCONOCIDO")
+        textura = dom_data["gto_textura"].get("textura_mesa", "DESCONOCIDA")
+        arquetipo = (dom_data.get("perfil_rival") or {}).get("estilo", "Desconocido")
+        try:
+            dom_data["memoria_errores"] = memory_obj.buscar_errores_similares(
+                hand_tier=tier,
+                board_texture=textura,
+                opp_archetype=arquetipo,
+                limit=2,
+            )
+        except Exception:
+            dom_data.setdefault("memoria_errores", [])
+
+    return dom_data
 
 def hacer_login(page):
     print(f"🌐 Navegando a la página principal: {config.LOGIN_URL}")
@@ -727,7 +1033,24 @@ def salir_de_mesa_vacia_o_finalizada(target_mesa, page, context) -> bool:
     return False
 
 def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
-    accion = decision.accion.upper()
+    target_url = ""
+    try:
+        u = getattr(target, "url", "")
+        target_url = u() if callable(u) else str(u or "")
+    except Exception:
+        target_url = ""
+
+    if es_mesa_dinero_real(dom_data, target_url):
+        print("🛑 [PLAY_MONEY_ONLY] Mesa de dinero real detectada. Negándose a ejecutar acciones.")
+        return "WAIT"
+
+    monto_raw = getattr(decision, "monto_apuesta", 0) or getattr(decision, "monto", 0) or 0
+    accion, monto_legal, motivo_correccion = validar_accion(decision.accion, monto_raw, dom_data)
+    if motivo_correccion:
+        print(f"🛡️ [VALIDACIÓN LEGALIDAD] {motivo_correccion}")
+        if isinstance(dom_data, dict):
+            dom_data["correccion_legalidad"] = motivo_correccion
+
     accion_ejecutada = accion
     print(f"⚡ [ACCION IA]: {accion} | Estado: [{decision.estado_pantalla}] | Evaluacion: {decision.evaluacion}")
     tracker.hero_just_acted_ts = time.time()
@@ -824,11 +1147,11 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
                         accion_ejecutada = "FOLD"
 
         elif accion == "RAISE":
-            monto = getattr(decision, "monto_apuesta", 0) or getattr(decision, "monto", 0) or 0
+            monto = monto_legal
             monto_actual_dom = int(re.sub(r"[^\d]", "", str((dom_data or {}).get("monto_apuesta_input", "0"))) or 0)
-            if monto > 0 and monto != monto_actual_dom and monto > 60:
+            if monto > 0 and monto != monto_actual_dom:
                 try:
-                    inp = target.locator("input.betting-input, input.raise-input").first
+                    inp = target.locator(raise_input_sel).first
                     if inp.is_visible():
                         print(f"💰 Ajustando importe de subida a: {monto}")
                         inp.fill(str(monto), timeout=300)
@@ -869,6 +1192,10 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
     except Exception as e:
         print(f"🏆 Partida o mesa finalizada/cerrada ({e}).")
 
+    if accion_ejecutada in ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN"):
+        if not verificar_accion_reflejada(target, accion_ejecutada, timeout_ms=700):
+            print(f"⚠️ [POST-CLIC] La acción {accion_ejecutada} no desapareció del DOM tras 700ms.")
+
     return accion_ejecutada
 
 def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
@@ -885,7 +1212,7 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
 
     fuerza = (dom_data.get('fuerza_mano') or '').strip()
     fuerza_lower = fuerza.lower()
-    botones = dom_data.get('botones_visibles', '') or dom_data.get('opciones_disponibles', '')
+    botones = str(dom_data.get('botones_visibles', '') or dom_data.get('opciones_disponibles', '')).upper()
     cartas = (dom_data.get('mis_cartas', '') or '').upper()
 
     gto_pre = dom_data.get('gto_preflop') or clasificar_mano_preflop(cartas)
@@ -1284,7 +1611,12 @@ def main():
                                 target_mesa.wait_for_selector("#FOLD, #CHECK, #CALL, #BET, #RAISE, .action-button", state="visible", timeout=450)
                             except Exception:
                                 time.sleep(0.25)
-                            dom_data = target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or {}
+                            dom_data.update(target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or {})
+
+                        if es_mesa_dinero_real(dom_data, getattr(page, "url", "")):
+                            print("🛑 [PLAY_MONEY_ONLY] Mesa de dinero real detectada. El bot se niega a jugar en dinero real.")
+                            time.sleep(2.0)
+                            continue
 
                         es_mi_turno = bool(dom_data.get('es_mi_turno') or tracker.http_turn_signal)
                         if es_mi_turno:
@@ -1293,31 +1625,19 @@ def main():
                             if tracker.http_turn_signal:
                                 tracker.http_turn_signal = False
 
-                        dom_data["historial_mano"] = tracker.obtener_contexto_completo()
-                        dom_data["perfil_rival"] = profiler.obtener_perfil_explotativo(tracker.opp_id, tracker.opp_nick)
+                        actualizar_dom_data_conservando_contexto(
+                            dom_data,
+                            None,
+                            tracker_obj=tracker,
+                            profiler_obj=profiler,
+                            memory_obj=experience_memory,
+                        )
 
-                        mis_cartas = dom_data.get('mis_cartas', '') or " ".join(tracker.my_cards)
-                        if tracker.current_street == "PREFLOP":
-                            comunitarias = ""
-                            tracker.community_cards.clear()
-                        else:
-                            comunitarias = dom_data.get('cartas_comunitarias', '') or " ".join(tracker.community_cards)
-
-                        if comunitarias and tracker.current_street == "PREFLOP":
-                            tracker.current_street = "POSTFLOP"
-
-                        bote = dom_data.get('bote', '') or tracker.last_pot or 0
+                        mis_cartas = dom_data["mis_cartas"]
+                        comunitarias = dom_data["cartas_comunitarias"]
+                        bote = dom_data["bote"]
                         botones = dom_data.get('botones_visibles', '') or dom_data.get('opciones_disponibles', '')
                         modales_o_botones = " | ".join(filter(None, [botones, dom_data.get('modales_visibles', '')]))
-
-                        dom_data["mis_cartas"] = mis_cartas
-                        dom_data["cartas_comunitarias"] = comunitarias
-                        dom_data["bote"] = bote
-                        dom_data["gto_preflop"] = clasificar_mano_preflop(mis_cartas)
-                        dom_data["gto_math"] = calcular_pot_odds_y_sizing(bote, dom_data.get('a_igualar'), dom_data.get('mi_stack'))
-                        dom_data["gto_textura"] = analizar_textura_mesa_y_blockers(mis_cartas, comunitarias)
-                        dom_data["gto_frecuencia"] = generar_frecuencia_mixta_gto()
-                        dom_data["gto_combinacion"] = evaluar_combinacion_mano_y_mesa(mis_cartas, comunitarias)
 
                         turno_id_actual = f"{mis_cartas}|{comunitarias}|{bote}|{botones}"
                         turno_street_key = (tracker.hand_number, tracker.current_street, mis_cartas, comunitarias)
@@ -1360,6 +1680,10 @@ def main():
                             print(f"⚡ [DECISIÓN IA ({dt:.2f}s)]: {decision.accion} | Confianza: {decision.confianza:.2f} | {decision.evaluacion}")
 
                             accion_ejecutada = ejecutar_accion(target_mesa, decision, dom_data=dom_data)
+                            tracker.last_hand_tier = (dom_data.get("gto_preflop") or {}).get("tier", "DESCONOCIDO")
+                            tracker.last_board_texture = (dom_data.get("gto_textura") or {}).get("textura_mesa", "DESCONOCIDA")
+                            tracker.last_opp_archetype = (dom_data.get("perfil_rival") or {}).get("estilo", "Desconocido")
+                            tracker.last_action_taken = accion_ejecutada
                             if analytics_logger is not None:
                                 try:
                                     analytics_logger.registrar_decision(

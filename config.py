@@ -20,6 +20,7 @@ MODO = os.getenv("MODO", "gemini")  # "gemini" o "heuristico"
 USAR_CAPTURA = os.getenv("USAR_CAPTURA", "false").lower() == "true"
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 HOLD_BROWSER_OPEN = os.getenv("HOLD_BROWSER_OPEN", "true").lower() == "true"
+PLAY_MONEY_ONLY = os.getenv("PLAY_MONEY_ONLY", "true").lower() == "true"
 CDP_PORT = int(os.getenv("CDP_PORT", "9222"))
 SLOW_MO = int(os.getenv("SLOW_MO", "100"))
 
@@ -61,14 +62,14 @@ SELECTORS = {
     "btn_call": "#CALL, button:has-text('Call'), button:has-text('Igualar'), button:has-text('Pagar'), .action-call, div#CALL, div:has-text('Call'), div:has-text('Igualar'), div:has-text('Pagar'), [id*='CALL']",
     "raise": "#RAISE, #BET, .action-raise, .action-bet, div#RAISE, div#BET, button:has-text('Raise'), button:has-text('Bet'), button:has-text('Subir'), button:has-text('Apostar')",
     "btn_raise": "#RAISE, #BET, .action-raise, .action-bet, div#RAISE, div#BET, button:has-text('Raise'), button:has-text('Bet'), button:has-text('Subir'), button:has-text('Apostar')",
-    "allin": "#ALLIN, button:has-text('All-in'), button:has-text('Allin'), div:has-text('All-in'), div:has-text('Allin'), .action-allin, [id*='ALLIN']",
-    "btn_allin": "#ALLIN, button:has-text('All-in'), button:has-text('Allin'), div:has-text('All-in'), div:has-text('Allin'), .action-allin, [id*='ALLIN']",
+    "allin": "#ALLIN, .actions-area button:has-text('All-in'), .actions-area button:has-text('Allin'), .actions-area [role='button']:has-text('All-in'), .actions-area [role='button']:has-text('Allin'), .actions-area .action-allin, .actions-area [id*='ALLIN']",
+    "btn_allin": "#ALLIN, .actions-area button:has-text('All-in'), .actions-area button:has-text('Allin'), .actions-area [role='button']:has-text('All-in'), .actions-area [role='button']:has-text('Allin'), .actions-area .action-allin, .actions-area [id*='ALLIN']",
     "raise_input": "input.betting-input, input[type='range'], input.raise-input",
     "btn_raise_input": "input.betting-input, input[type='range'], input.raise-input",
     "start": "button:has-text('Iniciar'), button:has-text('Start'), .btn-start",
     "btn_start": "button:has-text('Iniciar'), button:has-text('Start'), .btn-start",
-    "replay": "#general-popup-button-action-REPLAY, #general-popup-button-action-PLAY_AGAIN, button:has-text('Jugar de nuevo'), div:has-text('Jugar de nuevo'), span:has-text('Jugar de nuevo'), button:has-text('Replay'), .btn-replay",
-    "btn_replay": "#general-popup-button-action-REPLAY, #general-popup-button-action-PLAY_AGAIN, button:has-text('Jugar de nuevo'), div:has-text('Jugar de nuevo'), span:has-text('Jugar de nuevo'), button:has-text('Replay'), .btn-replay",
+    "replay": "#general-popup-button-action-REPLAY, #general-popup-button-action-PLAY_AGAIN, [role='dialog'] button:has-text('Jugar de nuevo'), [role='dialog'] [role='button']:has-text('Jugar de nuevo'), #general-popup button:has-text('Jugar de nuevo'), button:has-text('Jugar de nuevo'), button:has-text('Replay'), .btn-replay",
+    "btn_replay": "#general-popup-button-action-REPLAY, #general-popup-button-action-PLAY_AGAIN, [role='dialog'] button:has-text('Jugar de nuevo'), [role='dialog'] [role='button']:has-text('Jugar de nuevo'), #general-popup button:has-text('Jugar de nuevo'), button:has-text('Jugar de nuevo'), button:has-text('Replay'), .btn-replay",
     "btn_sitout": "#general-popup-button-action-OK, button:has-text('Aceptar Sit-out')",
     "game_over": ".game-over-modal, [data-result]",
 }

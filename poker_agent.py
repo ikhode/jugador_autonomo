@@ -32,6 +32,55 @@ class PokerDecision(BaseModel):
     monto_apuesta: int = Field(default=0, ge=0, description="Monto sugerido para apostar si la acción es RAISE")
     confianza: float = Field(default=0.5, ge=0.0, le=1.0, description="Nivel de confianza entre 0.0 y 1.0")
 
+def formatear_perfiles_para_prompt(dom_data: Optional[dict]) -> str:
+    """Formatea perfiles multijugador (perfiles_oponentes) o perfil único (perfil_rival) para el prompt."""
+    if not dom_data:
+        return ""
+
+    perfiles = dom_data.get("perfiles_oponentes")
+    bb_val = float(dom_data.get("big_blind") or getattr(config, "BIG_BLIND_DEFAULT", 20.0) or 20.0)
+    if isinstance(perfiles, list) and len(perfiles) > 0:
+        lineas = ["            ANÁLISIS EXPLOTATIVO DE RIVALES EN MESA (3-MAX):"]
+        for p in perfiles:
+            if not isinstance(p, dict):
+                continue
+            asiento = p.get("asiento", p.get("seat", "?"))
+            nick = p.get("nickname", f"Rival_{asiento}")
+            estado = str(p.get("estado", "ACTIVO")).upper()
+            if p.get("stack_bb") is not None:
+                stack_bb = float(p.get("stack_bb") or 0.0)
+            else:
+                raw_stack = p.get("stack", p.get("stack_chips", 0))
+                try:
+                    stack_chips = float(re.sub(r"[^\d.]", "", str(raw_stack)) or 0.0)
+                except Exception:
+                    stack_chips = 0.0
+                stack_bb = (stack_chips / bb_val) if bb_val > 0 else 0.0
+            arquetipo = p.get("estilo") or p.get("arquetipo") or "Desconocido"
+            muestra = int(p.get("manos_jugadas") or p.get("manos") or p.get("sample_size") or 0)
+            vpip = p.get("vpip_pct", 0)
+            pfr = p.get("pfr_pct", 0)
+            af = p.get("agresividad", 1.0)
+            rec = p.get("recomendacion_tactica", "Juego estándar")
+            lineas.append(
+                f"            - Asiento {asiento} ({nick}) [{estado}] | Stack: {stack_bb:.1f} BB | "
+                f"Arquetipo: {arquetipo} | Stats (n={muestra}): VPIP {vpip}% / PFR {pfr}% / AF {af} | "
+                f"Directriz: {rec}"
+            )
+        return "\n".join(lineas)
+
+    perfil = dom_data.get("perfil_rival", {})
+    if perfil:
+        muestra = int(perfil.get("manos_jugadas") or perfil.get("manos") or perfil.get("sample_size") or 0)
+        return f"""
+            ANÁLISIS EXPLOTATIVO DEL RIVAL DE LA MESA ({perfil.get('nickname', 'Rival')}):
+            - Estilo de juego detectado: {perfil.get('estilo', 'Desconocido')} (n={muestra} manos)
+            - VPIP: {perfil.get('vpip_pct', 0)}% | PFR: {perfil.get('pfr_pct', 0)}% | Factor Agresión: {perfil.get('agresividad', 1.0)}
+            - DIRECTRIZ TÁCTICA EXPLOTATIVA: {perfil.get('recomendacion_tactica', 'Juego estándar')}
+            """
+    return ""
+
+
 class PokerAgent:
     def __init__(self, api_key: str = None):
         key = api_key or config.GEMINI_API_KEY
@@ -90,14 +139,7 @@ class PokerAgent:
             comunitarias_str = " ".join(comunitarias) if isinstance(comunitarias, list) else str(comunitarias)
             historial_str = dom_data.get('historial_mano', '')
 
-            perfil = dom_data.get('perfil_rival', {})
-            if perfil:
-                perfil_rival_str = f"""
-            ANÁLISIS EXPLOTATIVO DEL RIVAL DE LA MESA ({perfil.get('nickname', 'Rival')}):
-            - Estilo de juego detectado: {perfil.get('estilo', 'Desconocido')}
-            - VPIP: {perfil.get('vpip_pct', 0)}% | PFR: {perfil.get('pfr_pct', 0)}% | Factor Agresión: {perfil.get('agresividad', 1.0)}
-            - DIRECTRIZ TÁCTICA EXPLOTATIVA: {perfil.get('recomendacion_tactica', 'Juego estándar')}
-            """
+            perfil_rival_str = formatear_perfiles_para_prompt(dom_data)
 
             gto_pre = dom_data.get('gto_preflop', {})
             gto_math = dom_data.get('gto_math', {})
