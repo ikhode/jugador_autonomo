@@ -2,7 +2,7 @@
 Modelos ORM de SQLAlchemy para el Bot de Póker Autónomo.
 Cubre memoria de experiencia, perfilado de oponentes y telemetría/analíticas.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime, Text, Boolean, BigInteger
@@ -19,7 +19,7 @@ class ErrorExperiencia(Base):
     __tablename__ = "errores_experiencia"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    timestamp: Mapped[Optional[str]] = mapped_column(String, default=lambda: datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
+    timestamp: Mapped[Optional[str]] = mapped_column(String, default=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
     hand_tier: Mapped[Optional[str]] = mapped_column(String)
     board_texture: Mapped[Optional[str]] = mapped_column(String)
     opp_archetype: Mapped[Optional[str]] = mapped_column(String)
@@ -60,7 +60,7 @@ class Oponente(Base):
     last_status: Mapped[Optional[str]] = mapped_column(String, default="ACTIVE")
     known_aliases: Mapped[Optional[str]] = mapped_column(Text, default="[]")
     ultimas_cartas_mostradas: Mapped[Optional[str]] = mapped_column(Text)
-    ultima_actualizacion: Mapped[Optional[str]] = mapped_column(String, default=lambda: datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
+    ultima_actualizacion: Mapped[Optional[str]] = mapped_column(String, default=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
 
 # ==============================================================================
 # 3. VERSIÓN DEL BOT (EXPERIMENTACIÓN Y TRAZABILIDAD)
@@ -285,3 +285,13 @@ class SystemTelemetry(Base):
     pending_tasks: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     dropped_records: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     storage_errors: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+
+
+# ==============================================================================
+# 10. MIGRACIONES DE ESQUEMA
+# ==============================================================================
+class SchemaMigration(Base):
+    __tablename__ = "schema_migrations"
+
+    version: Mapped[str] = mapped_column(String, primary_key=True)
+    applied_at: Mapped[str] = mapped_column(String)

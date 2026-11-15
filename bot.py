@@ -29,7 +29,7 @@ bg_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 analytics_logger = PokerAnalyticsLogger(
     version_id=getattr(config, "BOT_VERSION", "1.3"),
     version_description=getattr(config, "BOT_VERSION_DESC", "Configuración activa del bot"),
-    model_name=getattr(config, "GEMINI_MODEL", "gemini-3.1-flash-lite"),
+    model_name=getattr(config, "GEMINI_MODEL", "gemini-2.5-flash"),
     initial_bankroll=getattr(config, "INITIAL_BANKROLL", 1500.0),
     big_blind=getattr(config, "BIG_BLIND_DEFAULT", 20.0),
     async_mode=True,
@@ -638,11 +638,12 @@ def _parse_num_dom(valor: Any, default: float = 0.0) -> float:
         return default
     if isinstance(valor, (int, float)):
         return float(valor)
-    limpio = re.sub(r"[^\d.]", "", str(valor).replace(",", ""))
-    if not limpio:
+    # Extraer el primer número válido en lugar de concatenar dígitos de listas ("40 | 20" -> 40, no 4020)
+    m = re.search(r"-?\d+(?:\.\d+)?", str(valor).replace(",", ""))
+    if not m:
         return default
     try:
-        return float(limpio)
+        return float(m.group(0))
     except Exception:
         return default
 
@@ -1624,6 +1625,7 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
     hay_bet = 'BET' in botones or 'RAISE' in botones
     hay_allin = 'ALL_IN' in botones or 'ALLIN' in botones
 
+    tier = gto_pre.get('tier', 'DESCONOCIDO')
     modo_allin_or_fold = (hay_allin or 'ALL_IN' in botones or 'ALLIN' in botones) and ('FOLD' in botones) and not hay_check and not hay_call and not hay_bet
     desc_mano = (gto_comb.get('categoria') if not es_preflop and gto_comb.get('categoria') != 'CARTA ALTA PRIVADA' else None) or fuerza or gto_pre.get('mano_code') or cartas
 
@@ -1861,13 +1863,17 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
         # Último filtro por EV cuando hay duda en postflop
         if not es_preflop and (es_mano_jugable or gto_comb.get('proyecto_gutshot')):
             ev_res = decidir_por_ev(dom_data)
-            if ev_res['accion'] in ('CALL', 'RAISE', 'ALL_IN'):
+            ev_acc = ev_res['accion']
+            if ev_acc == 'RAISE' and not es_mano_fuerte and textura_peligrosa and float(ev_res.get('equity') or 0.0) < 0.55 and hay_call:
+                ev_acc = 'CALL'
+                ev_res = dict(ev_res, accion='CALL', monto=0, razon=f"{ev_res['razon']} -> Call controlado en board peligroso")
+            if ev_acc in ('CALL', 'RAISE', 'ALL_IN'):
                 return PokerDecision(
                     evaluacion=f"⚡ [0ms EV] {ev_res['razon']}",
                     estrategia_competitiva="Decisión óptima por Valor Esperado",
                     estado_pantalla="EN_MESA_JUEGO",
                     es_mi_turno=True,
-                    accion=ev_res['accion'],
+                    accion=ev_acc,
                     monto_apuesta=ev_res['monto'],
                     confianza=0.82,
                 )
@@ -2050,11 +2056,35 @@ def main():
                                                 profiler,
                                                 hero_nick=getattr(config, "HERO_NICKNAME", ""),
                                             )
+                                            dealer_idx = next((i for i, p in enumerate(data_json["playerStates"]) if p.get("isDealer")), None)
+                                            hero_idx = next(
+                                                (
+                                                    i for i, p in enumerate(data_json["playerStates"])
+                                                    if ("cards" in p and any(c != 'X' for c in p.get('cards', [])))
+                                                    or (getattr(config, "HERO_NICKNAME", "") and str(p.get("playerName") or p.get("nickname") or "").strip().lower() == str(getattr(config, "HERO_NICKNAME", "")).strip().lower())
+                                                ),
+                                                None,
+                                            )
+                                            if dealer_idx is not None and hero_idx is not None:
+                                                n_seats = max(2, len(data_json["playerStates"]))
+                                                rel = (hero_idx - dealer_idx) % n_seats
+                                                if rel == 0:
+                                                    tracker.is_dealer = True
+                                                    tracker.position_name = "BTN"
+                                                elif n_seats == 2:
+                                                    tracker.is_dealer = False
+                                                    tracker.position_name = "BB"
+                                                elif rel == 1:
+                                                    tracker.is_dealer = False
+                                                    tracker.position_name = "SB"
+                                                else:
+                                                    tracker.is_dealer = False
+                                                    tracker.position_name = "BB"
                                             for ps in data_json["playerStates"]:
                                                 if "isDealer" in ps and ps["isDealer"]:
                                                     if "cards" in ps and any(c != 'X' for c in ps.get('cards', [])):
                                                         tracker.is_dealer = True
-                                                        tracker.position_name = "BUTTON (Dealer)"
+                                                        tracker.position_name = "BTN"
                                                         tracker.registrar_evento("WS_POSICION", "Hero es DEALER (Ventaja Posicional)")
 
                                                 if "cards" in ps and isinstance(ps["cards"], list):
@@ -2320,7 +2350,7 @@ def main():
                                     "decision_source": decision_source,
                                     "intended_action": getattr(decision, "accion", ""),
                                     "executed_action": accion_ejecutada,
-                                    "monto": getattr(decision, "monto", 0),
+                                    "monto": getattr(decision, "monto_apuesta", 0),
                                     "confianza": getattr(decision, "confianza", 0.0),
                                     "latency_ms": round(dt * 1000.0, 2),
                                 },

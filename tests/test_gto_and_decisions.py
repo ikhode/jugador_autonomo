@@ -231,6 +231,30 @@ class TestGTOAndDecisions(unittest.TestCase):
             parsed = json.loads(lines[0])
             self.assertEqual(parsed["executed_action"], "CALL")
 
+    def test_fixes_post_log_tier_allin_fold_parse_num_y_db_models(self):
+        # 1. modo_allin_or_fold no debe lanzar UnboundLocalError por tier
+        dom_aof = {
+            "es_mi_turno": True,
+            "mis_cartas": "A♦ K♣",
+            "cartas_comunitarias": "J♥ 10♥ 9♣",
+            "bote": "930",
+            "mi_stack": "400",
+            "big_blind": 20,
+            "botones_visibles": "FOLD, ALLIN",
+            "posicion": "BTN",
+        }
+        bot.actualizar_dom_data_conservando_contexto(dom_aof, None)
+        dec_aof = bot.decidir_accion_rapida(dom_aof)
+        self.assertIn(dec_aof.accion, ("ALL_IN", "FOLD"))
+
+        # 2. _parse_num_dom no concatena dígitos separados ("40 | 20" -> 40.0, no 4020)
+        self.assertEqual(bot._parse_num_dom("40 | 20"), 40.0)
+        self.assertEqual(bot._parse_num_dom("500 | 500"), 500.0)
+
+        # 3. db_models incluye SchemaMigration alineado con analytics_db
+        import db_models
+        self.assertIn("schema_migrations", db_models.Base.metadata.tables)
+
 
 if __name__ == "__main__":
     unittest.main()
