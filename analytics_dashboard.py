@@ -2626,22 +2626,10 @@ def obtener_estado_live_dict() -> Dict[str, Any]:
 
 
 def crear_app_flask_dashboard(db_path: Path = DB_PATH):
-    """Crea la aplicación Flask para el Dashboard en tiempo real con modo DEBUG habilitado."""
-    from flask import Flask, jsonify, request, make_response
-    app = Flask(__name__)
-    app.config['DEBUG'] = True
-    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
-
-    info = generar_dashboard_html(db_path=db_path)
-    html_path = Path(info["dashboard_html_path"])
-    storage = AnalyticsStorage(db_path=db_path)
-    engine = PokerAnalyticsEngine(storage=storage)
-
-def crear_app_flask_dashboard(db_path: Path = DB_PATH):
-    """Crea la aplicación Flask para el Dashboard en tiempo real con modo DEBUG habilitado."""
+    """Crea la aplicación Flask para el Dashboard en tiempo real."""
     from flask import Flask, jsonify, request, make_response, send_from_directory
     app = Flask(__name__)
-    app.config['DEBUG'] = True
+    app.config['DEBUG'] = False
     app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
     info = generar_dashboard_html(db_path=db_path)
@@ -2649,11 +2637,14 @@ def crear_app_flask_dashboard(db_path: Path = DB_PATH):
     storage = AnalyticsStorage(db_path=db_path)
     engine = PokerAnalyticsEngine(storage=storage)
 
-    @app.route('/', methods=['GET'])
-    @app.route('/index.html', methods=['GET'])
-    @app.route('/dashboard', methods=['GET'])
+    @app.route('/', methods=['GET', 'HEAD'])
+    @app.route('/index.html', methods=['GET', 'HEAD'])
+    @app.route('/dashboard', methods=['GET', 'HEAD'])
     def index():
-        generar_dashboard_html(db_path=db_path, output_html=html_path, auto_seed_benchmark_if_empty=False)
+        if request.method == 'HEAD':
+            resp = make_response('', 200)
+            resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+            return resp
         content = html_path.read_text(encoding='utf-8')
         resp = make_response(content)
         resp.headers['Content-Type'] = 'text/html; charset=utf-8'
@@ -2739,55 +2730,21 @@ def crear_app_flask_dashboard(db_path: Path = DB_PATH):
 
 
 def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browser: bool = True) -> None:
-    """Inicia un servidor Flask en modo DEBUG (con hot reloading habilitado)."""
+    """Inicia un servidor Flask para el Dashboard de Analíticas."""
     try:
         app = crear_app_flask_dashboard(db_path=db_path)
         url = f"http://127.0.0.1:{port}/dashboard"
-        print(f"🌐 Servidor Flask (modo DEBUG) iniciado en: {url}")
+        print(f"🌐 Servidor Flask iniciado en: {url}")
         if open_browser:
             try:
                 webbrowser.open(url)
             except Exception:
                 pass
-        app.run(host="127.0.0.1", port=port, debug=True, use_reloader=False)
+        app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+    except KeyboardInterrupt:
+        print("\n🛑 Servidor detenido.")
     except Exception as e:
-        print(f"⚠️ Caída a servidor HTTP por defecto: {e}")
-        try:
-            httpd.serve_forever()
-=======
-def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browser: bool = True) -> None:
-    """Inicia un servidor Flask en modo DEBUG (con hot reloading habilitado)."""
-    try:
-        app = crear_app_flask_dashboard(db_path=db_path)
-        url = f"http://127.0.0.1:{port}/dashboard"
-        print(f"🌐 Servidor Flask (modo DEBUG) iniciado en: {url}")
-        if open_browser:
-            try:
-                webbrowser.open(url)
-            except Exception:
-                pass
-        app.run(host="127.0.0.1", port=port, debug=True, use_reloader=False)
-    except Exception as e:
-        print(f"⚠️ Caída a servidor HTTP por defecto: {e}")
->>>>>>> befb413 (feat: migrate dashboard HTTP server to Flask in DEBUG mode with hot reloading)
-        except KeyboardInterrupt:
-            print("\n🛑 Servidor detenido.")
-=======
-def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browser: bool = True) -> None:
-    """Inicia un servidor Flask en modo DEBUG (con hot reloading habilitado)."""
-    try:
-        app = crear_app_flask_dashboard(db_path=db_path)
-        url = f"http://127.0.0.1:{port}/dashboard"
-        print(f"🌐 Servidor Flask (modo DEBUG) iniciado en: {url}")
-        if open_browser:
-            try:
-                webbrowser.open(url)
-            except Exception:
-                pass
-        app.run(host="127.0.0.1", port=port, debug=True, use_reloader=False)
-    except Exception as e:
-        print(f"⚠️ Caída a servidor HTTP por defecto: {e}")
->>>>>>> 771b305 (feat: migrate dashboard HTTP server to Flask in DEBUG mode with hot reloading)
+        print(f"⚠️ Error al iniciar servidor Flask: {e}")
 
 
 _dashboard_server_thread = None
