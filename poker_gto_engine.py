@@ -209,11 +209,55 @@ def clasificar_mano_preflop(
     sit_norm = (situacion or "open").strip().lower()
     stack_bb = float(stack_efectivo_bb or 25.0)
 
-    # Ajustes contextuales 3-Max
-    if pos_norm == "BTN" and sit_norm == "open" and tier == "C":
-        score += 5
-    elif pos_norm == "SB" and sit_norm == "vs_raise" and tier in ("C", "BASURA"):
-        score -= 6
+    # Ajustes contextuales según posición (6-Max y 3-Max)
+    if pos_norm in ("UTG", "EP"):
+        if sit_norm == "open":
+            if tier == "S":
+                score = min(100, score + 2)
+            elif tier == "A":
+                score = min(95, score + 1)
+            elif tier == "B":
+                # En UTG 6-Max se descartan broadways débiles y conectores especulativos
+                if not es_pareja and (v1 < 14 or v2 < 11):
+                    score -= 8
+                    tier = "C"
+            elif tier in ("C", "BASURA"):
+                score = max(10, score - 15)
+                tier = "BASURA"
+        elif sit_norm in ("vs_raise", "vs_3bet", "vs_allin"):
+            if tier in ("C", "BASURA"):
+                score -= 15
+            elif tier == "B" and not es_pareja:
+                score -= 10
+    elif pos_norm in ("MP", "HJ"):
+        if sit_norm == "open":
+            if tier in ("C", "BASURA"):
+                score = max(15, score - 12)
+                tier = "BASURA"
+            elif tier == "B" and not es_pareja and v1 < 13:
+                score -= 5
+        elif sit_norm in ("vs_raise", "vs_3bet", "vs_allin"):
+            if tier in ("C", "BASURA"):
+                score -= 12
+    elif pos_norm in ("CO", "LP"):
+        if sit_norm == "open":
+            if tier in ("S", "A", "B"):
+                score += 3
+            elif tier == "C":
+                score += 2
+        elif sit_norm in ("vs_3bet", "vs_allin"):
+            if tier in ("C", "BASURA"):
+                score -= 10
+    elif pos_norm == "BTN":
+        if sit_norm == "open" and tier in ("B", "C"):
+            score += 5
+        elif sit_norm in ("vs_3bet", "vs_allin") and tier in ("C", "BASURA"):
+            score -= 10
+    elif pos_norm == "SB":
+        if sit_norm == "open" and tier in ("S", "A"):
+            score += 2
+        elif sit_norm == "vs_raise" and tier in ("C", "BASURA"):
+            score -= 8
     elif sit_norm in ("vs_3bet", "vs_allin"):
         if tier in ("C", "BASURA"):
             score -= 12

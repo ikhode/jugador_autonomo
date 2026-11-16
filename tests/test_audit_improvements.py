@@ -245,3 +245,93 @@ def test_human_timing_delay_calculation():
     finally:
         if orig is not None:
             os.environ["PYTEST_CURRENT_TEST"] = orig
+
+
+def test_6max_position_resolution_all_positions():
+    tracker = GameTracker()
+
+    # 1. Mesa completa de 6 jugadores: Dealer en asiento 1, Hero en asiento 4 -> UTG
+    dom_6p_utg = {
+        "es_mi_turno": True,
+        "mis_cartas": "A♣ K♦",
+        "cartas_comunitarias": "",
+        "bote": 30,
+        "a_igualar": 20,
+        "big_blind": 20,
+        "opciones_disponibles": "FOLD | CALL | RAISE",
+        "jugadores_mesa": [
+            {"seat": 1, "is_dealer": True, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 2, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 3, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 4, "is_dealer": False, "is_hero": True, "estado": "ACTIVO"},
+            {"seat": 5, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 6, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+        ],
+    }
+    actualizar_dom_data_conservando_contexto(dom_6p_utg, nuevo_dom=None, tracker_obj=tracker)
+    assert dom_6p_utg["posicion"] == "UTG"
+    assert tracker.position_name == "UTG"
+
+    # 2. Hero en asiento 5 -> MP
+    tracker.reset_mano()
+    dom_6p_mp = {
+        "es_mi_turno": True,
+        "mis_cartas": "A♣ K♦",
+        "big_blind": 20,
+        "jugadores_mesa": [
+            {"seat": 1, "is_dealer": True, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 2, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 3, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 4, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 5, "is_dealer": False, "is_hero": True, "estado": "ACTIVO"},
+            {"seat": 6, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+        ],
+    }
+    actualizar_dom_data_conservando_contexto(dom_6p_mp, nuevo_dom=None, tracker_obj=tracker)
+    assert dom_6p_mp["posicion"] == "MP"
+
+    # 3. Hero en asiento 6 -> CO
+    tracker.reset_mano()
+    dom_6p_co = {
+        "es_mi_turno": True,
+        "mis_cartas": "A♣ K♦",
+        "big_blind": 20,
+        "jugadores_mesa": [
+            {"seat": 1, "is_dealer": True, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 2, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 3, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 4, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 5, "is_dealer": False, "is_hero": False, "estado": "ACTIVO"},
+            {"seat": 6, "is_dealer": False, "is_hero": True, "estado": "ACTIVO"},
+        ],
+    }
+    actualizar_dom_data_conservando_contexto(dom_6p_co, nuevo_dom=None, tracker_obj=tracker)
+    assert dom_6p_co["posicion"] == "CO"
+
+
+def test_6max_preflop_classification_discipline():
+    from poker_gto_engine import clasificar_mano_preflop
+
+    # Mano marginal K9o
+    # En UTG debe ser clasificada como BASURA para evitar pérdidas fuera de posición
+    res_utg = clasificar_mano_preflop("K♠ 9♦", posicion="UTG", situacion="open")
+    assert res_utg["tier"] == "BASURA"
+    assert res_utg["score"] <= 50
+
+    # La misma mano en el Botón (BTN) tiene bonus posicional para robo
+    res_btn = clasificar_mano_preflop("K♠ 9♦", posicion="BTN", situacion="open")
+    assert res_btn["score"] > res_utg["score"]
+
+    # Mano Premium AA en UTG debe tener score máximo
+    res_aa_utg = clasificar_mano_preflop("A♠ A♥", posicion="UTG", situacion="open")
+    assert res_aa_utg["tier"] == "S"
+    assert res_aa_utg["score"] >= 95
+
+
+def test_texas_holdem_config_and_selectors():
+    assert config.POKER_MODE == "Cash Game Texas Hold'em"
+    assert config.MAX_TABLE_SEATS == 6
+    assert config.MAX_SEATS == 6
+    assert "Texas Hold'em" in config.SELECTORS["select_game_card"]
+    assert ".game-category-tile.cash-game" in config.SELECTORS["select_game_card"]
+    assert "twister" not in config.SELECTORS["select_game_card"].lower()

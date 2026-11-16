@@ -551,7 +551,7 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
             <!-- Estado de la Mano y Capacidad de Mesa -->
             <div class="card" style="border-left: 4px solid var(--accent-blue); margin-bottom: 16px;">
                 <div class="card-title">
-                    <span>🎴 Estado de la Mano Actual (#<span id="live-hand-num">1</span>) — <span id="live-modalidad" style="color:#38bdf8;">Twister 3-Max</span></span>
+                    <span>🎴 Estado de la Mano Actual (#<span id="live-hand-num">1</span>) — <span id="live-modalidad" style="color:#38bdf8;">Texas Hold'em 6-Max</span></span>
                     <span class="badge badge-purple" id="live-street-badge">PREFLOP</span>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 12px;">
@@ -2199,7 +2199,7 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
             const elHandNum = document.getElementById('live-hand-num');
             if (elHandNum) elHandNum.textContent = live.hand_number || 1;
             const elMod = document.getElementById('live-modalidad');
-            if (elMod) elMod.textContent = live.modalidad || 'Twister 3-Max';
+            if (elMod) elMod.textContent = live.modalidad || "Texas Hold'em 6-Max";
             const elStreet = document.getElementById('live-street-badge');
             if (elStreet) elStreet.textContent = live.current_street || 'PREFLOP';
             const elMyCards = document.getElementById('live-my-cards');
@@ -2448,7 +2448,7 @@ def _obtener_datos_live_para_dashboard(db_path: Path) -> Dict[str, Any]:
             "community_cards": [],
             "last_pot": 0,
             "position_name": "Desconocida",
-            "modalidad": getattr(config, "POKER_MODE", "Twister 3-Max"),
+            "modalidad": getattr(config, "POKER_MODE", "Texas Hold'em 6-Max"),
             "table_info": {
                 "max_asientos": max_seats,
                 "asientos_ocupados": 0,

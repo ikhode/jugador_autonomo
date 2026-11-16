@@ -209,17 +209,18 @@ def _clasificar_rival(
     if acciones_observadas is not None and acciones_observadas <= 0:
         return "SIN DATOS", "Sin acciones observadas del rival para clasificar"
 
-    if vpip < 22.0 and pfr < 16.0:
-        return "NIT", "Ultra selectivo y pasivo en 3-Max; foldea demasiado ante presión"
-    if vpip >= 48.0 and af >= 2.2 and (pfr >= 26.0 or three_bet >= 11.0):
+    # Umbrales calibrados para Texas Hold'em (6-Max) y juego estándar
+    if vpip < 18.0 and pfr < 14.0:
+        return "NIT", "Ultra selectivo y tight; foldea con alta frecuencia ante presión"
+    if vpip >= 42.0 and af >= 2.0 and (pfr >= 25.0 or three_bet >= 10.0):
         return "Maniac", "Hiper-agresivo con rangos muy amplios y alta frecuencia de farol"
-    if vpip >= 44.0 and af < 1.2:
+    if vpip >= 38.0 and af < 1.3:
         return "Calling Station", "Paga con demasiada frecuencia y raramente toma la iniciativa"
-    if 22.0 <= vpip <= 34.0 and 16.0 <= pfr <= 26.0 and af >= 1.5 and (vpip - pfr) <= 12.0:
-        return "TAG", "Sólido, selectivo y agresivo en posición 3-Max"
-    if vpip >= 35.0 and pfr >= 24.0 and af >= 1.6:
-        return "LAG", "Amplio y agresivo; presiona botes postflop"
-    return "Regular equilibrado", "Frecuencias balanceadas para 3-Max sin sesgos extremos"
+    if 18.0 <= vpip <= 28.0 and 14.0 <= pfr <= 23.0 and af >= 1.4 and (vpip - pfr) <= 10.0:
+        return "TAG", "Sólido, selectivo y agresivo en posición (Tight-Aggressive 6-Max)"
+    if vpip >= 29.0 and pfr >= 21.0 and af >= 1.5:
+        return "LAG", "Amplio y agresivo; presiona botes postflop (Loose-Aggressive 6-Max)"
+    return "Regular equilibrado", "Frecuencias balanceadas para Hold'em sin sesgos extremos"
 
 
 def generar_analisis_explotativo_contextual(
