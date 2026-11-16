@@ -912,25 +912,21 @@ def validar_accion(accion: str, monto: Any, estado_dom: Optional[dict]) -> Tuple
                 return "FOLD", 0, "Modo All-in o Fold con mano débil -> FOLD"
 
         if accion_norm == "FOLD":
-            if hay_check and a_igualar <= 0:
+            if a_igualar <= 0 or hay_check:
                 return "CHECK", 0, "FOLD innecesario con CHECK gratis -> CHECK"
             if hay_fold:
                 return "FOLD", 0, None
-            if hay_check:
-                return "CHECK", 0, "FOLD no disponible -> CHECK"
             if hay_call:
                 return "CALL", 0, "FOLD no disponible -> CALL"
             return "WAIT", 0, "FOLD sin botones legales -> WAIT"
 
         if accion_norm == "CHECK":
-            if hay_check and a_igualar <= 0:
+            if hay_check or a_igualar <= 0:
                 return "CHECK", 0, None
             if hay_call:
                 return "CALL", 0, "CHECK ilegal con apuesta activa -> CALL"
             if hay_fold:
-                return "FOLD", 0, "CHECK ilegal -> FOLD"
-            if hay_allin:
-                return "ALL_IN", 0, "CHECK ilegal -> ALL_IN"
+                return "FOLD", 0, "CHECK ilegal con apuesta activa -> FOLD"
             return "WAIT", 0, "CHECK sin botones legales -> WAIT"
 
         if accion_norm == "CALL":
@@ -938,10 +934,12 @@ def validar_accion(accion: str, monto: Any, estado_dom: Optional[dict]) -> Tuple
                 return "CALL", 0, None
             if hay_check and a_igualar <= 0:
                 return "CHECK", 0, "CALL sin apuesta -> CHECK"
-            if hay_allin:
-                return "ALL_IN", 0, "CALL no disponible -> ALL_IN"
-            if hay_fold:
+            if a_igualar >= mi_stack and mi_stack > 0 and hay_allin:
+                return "ALL_IN", 0, "CALL de All-in -> ALL_IN"
+            if hay_fold and a_igualar > 0:
                 return "FOLD", 0, "CALL no disponible -> FOLD"
+            if hay_check:
+                return "CHECK", 0, "CALL no disponible -> CHECK"
             return "WAIT", 0, "CALL sin botones legales -> WAIT"
 
         if accion_norm == "RAISE":
@@ -1131,36 +1129,28 @@ def actualizar_dom_data_conservando_contexto(
                 prev_state = tracker_obj.prev_player_states.get(pid_j or nick_j, {})
                 prev_bet = float(prev_state.get("bet", 0.0))
                 prev_st = str(prev_state.get("status", "ACTIVE")).upper()
+                last_act = prev_state.get("last_action", "")
 
                 calle = getattr(tracker_obj, "current_street", "PREFLOP")
                 hand_id = getattr(tracker_obj, "hand_number", 1)
 
+                registered_action = None
                 if estado_dom in ("FOLD", "FOLDED") and prev_st not in ("FOLD", "FOLDED"):
-                    profiler_obj.registrar_accion_rival(
-                        player_id=pid_j,
-                        nickname=nick_j,
-                        accion="FOLD",
-                        calle=calle,
-                        seat=j.get("asiento"),
-                        status=estado_dom,
-                        hand_id=hand_id,
-                    )
+                    registered_action = "FOLD"
                 elif bet_dom > prev_bet:
-                    act = "RAISE" if (calle == "PREFLOP" or prev_bet > 0) else "BET"
+                    registered_action = "RAISE" if (calle == "PREFLOP" or prev_bet > 0) else "BET"
+                elif ("CALL" in action_dom or "IGUALAR" in action_dom or "PAGAR" in action_dom) and last_act != "CALL":
+                    registered_action = "CALL"
+                elif "CHECK" in action_dom and calle != "PREFLOP" and last_act != "CHECK":
+                    registered_action = "CHECK"
+                elif bet_dom > 0 and abs(bet_dom - prev_bet) < 0.001 and last_act not in ("CALL", "BET", "RAISE", "CHECK") and prev_st not in ("FOLD", "FOLDED"):
+                    registered_action = "CALL"
+
+                if registered_action:
                     profiler_obj.registrar_accion_rival(
                         player_id=pid_j,
                         nickname=nick_j,
-                        accion=act,
-                        calle=calle,
-                        seat=j.get("asiento"),
-                        status=estado_dom,
-                        hand_id=hand_id,
-                    )
-                elif "CHECK" in action_dom and calle != "PREFLOP":
-                    profiler_obj.registrar_accion_rival(
-                        player_id=pid_j,
-                        nickname=nick_j,
-                        accion="CHECK",
+                        accion=registered_action,
                         calle=calle,
                         seat=j.get("asiento"),
                         status=estado_dom,
@@ -1171,6 +1161,7 @@ def actualizar_dom_data_conservando_contexto(
                     "bet": bet_dom,
                     "status": estado_dom,
                     "nickname": nick_j,
+                    "last_action": registered_action or last_act,
                 }
 
                 prof_j = dict(profiler_obj.obtener_perfil_explotativo(pid_j, nick_j))
@@ -1854,9 +1845,11 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None, tiempo_ia
     except Exception:
         target_url = ""
 
-    if es_mesa_dinero_real(dom_data, target_url):
-        print("🛑 [PLAY_MONEY_ONLY] Mesa de dinero real detectada. Negándose a ejecutar acciones.")
+    if getattr(config, "PLAY_MONEY_ONLY", True) and es_mesa_dinero_real(dom_data, target_url):
+        print("⛔ [SEGURIDAD] Bloqueada ejecución en mesa de dinero real (PLAY_MONEY_ONLY=true)")
         return "WAIT"
+
+
 
     monto_raw = getattr(decision, "monto_apuesta", 0) or getattr(decision, "monto", 0) or 0
     accion, monto_legal, motivo_correccion = validar_accion(decision.accion, monto_raw, dom_data)
@@ -1945,7 +1938,7 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None, tiempo_ia
         elif accion == "CALL":
             if intentar_click(target, btn_call, "Botón Call", timeout=2000):
                 accion_ejecutada = "CALL"
-            elif clicar_texto_modal_universal(target, ["Call", "Igualar", "Pagar", "All-in", "Allin"], "Botón Call (Texto)"):
+            elif clicar_texto_modal_universal(target, ["Call", "Igualar", "Pagar"], "Botón Call (Texto)"):
                 accion_ejecutada = "CALL"
             elif intentar_click(target, btn_check, "Botón Check (Fallback Call)", timeout=1500):
                 accion_ejecutada = "CHECK"
@@ -2563,6 +2556,15 @@ def main():
                                     and (time.time() - tracker.ws_action_ts > 1.0)
                                 ):
                                     profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "BET", calle=tracker.current_street, hand_id=tracker.hand_number)
+                            elif "player_call.mp3" in url or "action_call.png" in url or "chip_call.png" in url:
+                                tracker.registrar_evento("ACCION_MESA", "Call detectado (señal de sonido/timing)")
+                                if (
+                                    len(tracker.active_opponents) <= 2
+                                    and (tracker.opp_id or tracker.opp_nick)
+                                    and (time.time() - tracker.hero_just_acted_ts > 1.2)
+                                    and (time.time() - tracker.ws_action_ts > 1.0)
+                                ):
+                                    profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "CALL", calle=tracker.current_street, hand_id=tracker.hand_number)
                             elif "player_fold.mp3" in url or "action_fold.png" in url:
                                 tracker.registrar_evento("ACCION_MESA", "Fold detectado (señal de sonido/timing)")
                                 if (
@@ -2858,10 +2860,7 @@ def main():
                                 time.sleep(0.25)
                             dom_data.update(target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or {})
 
-                        if es_mesa_dinero_real(dom_data, getattr(page, "url", "")):
-                            print("🛑 [PLAY_MONEY_ONLY] Mesa de dinero real detectada. El bot se niega a jugar en dinero real.")
-                            time.sleep(2.0)
-                            continue
+
 
                         if detectar_desconexion(dom_data, page=page):
                             print("⚠️ [DESCONEXIÓN] Detectada pérdida de conexión en mesa/navegador. Esperando backoff...")

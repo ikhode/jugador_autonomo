@@ -1225,11 +1225,21 @@ class AnalyticsStorage:
         clauses = []
         params: List[Any] = []
 
+        # Filtro de calidad automático: Excluir manos/decisiones corruptas o con botes imposibles
+        if table_type == "hands":
+            clauses.append("(pot_final IS NULL OR pot_final <= 3000.0)")
+            clauses.append("(net_profit_bb IS NULL OR ABS(net_profit_bb) <= 1000.0)")
+            clauses.append("(ev_net_bb IS NULL OR ABS(ev_net_bb) <= 300.0)")
+        elif table_type == "decisions":
+            clauses.append("(pot_size IS NULL OR pot_size <= 3000.0)")
+            clauses.append("(ev_lost_bb IS NULL OR ABS(ev_lost_bb) <= 150.0)")
+            clauses.append("evaluation_available = 1")
+
         # Separación explícita entre datos reales ('live', is_synthetic=0) y sintéticos ('benchmark', is_synthetic=1)
-        data_source = str(filters.get("data_source") or "").lower()
-        if data_source == "live" or filters.get("is_synthetic") is False or filters.get("is_synthetic") == 0:
+        data_source = str(filters.get("data_source") or "").lower() if filters else ""
+        if data_source == "live" or (filters and (filters.get("is_synthetic") is False or filters.get("is_synthetic") == 0)):
             clauses.append("is_synthetic = 0")
-        elif data_source == "benchmark" or filters.get("is_synthetic") is True or filters.get("is_synthetic") == 1:
+        elif data_source == "benchmark" or (filters and (filters.get("is_synthetic") is True or filters.get("is_synthetic") == 1)):
             clauses.append("is_synthetic = 1")
 
         if filters.get("date_from"):

@@ -682,6 +682,7 @@ def evaluar_combinacion_mano_y_mesa(mis_cartas_str: str, comunitarias_str: str) 
         "es_trips": es_trips,
         "es_doble_pareja": es_doble_pareja,
         "es_monstruo": es_monstruo,
+        "es_pareja_propia_o_conectada": bool(es_pareja_en_mano or coincidencias or (rank_cat >= 2 and usa_mis_cartas)),
         **draws,
     }
 
@@ -690,8 +691,29 @@ def _limpiar_num(s: Any) -> float:
     if isinstance(s, (int, float)):
         return float(s)
     texto = str(s or "0").strip()
-    m = re.search(r"\d+(?:[.,]\d+)?", texto.replace(",", ""))
-    return float(m.group(0)) if m else 0.0
+    if not texto:
+        return 0.0
+    tok = texto.split("|")[0].strip()
+    m = re.search(r"\$?\s*(\d+(?:[.,]\d+)?)", tok)
+    if not m:
+        return 0.0
+    num_str = m.group(1)
+    if "," in num_str and "." in num_str:
+        if num_str.rfind(",") > num_str.rfind("."):
+            num_str = num_str.replace(".", "").replace(",", ".")
+        else:
+            num_str = num_str.replace(",", "")
+    elif "," in num_str:
+        parts = num_str.split(",")
+        if len(parts[-1]) in (1, 2):
+            num_str = num_str.replace(",", ".")
+        else:
+            num_str = num_str.replace(",", "")
+    try:
+        val = float(num_str)
+        return val if val >= 0 else 0.0
+    except Exception:
+        return 0.0
 
 
 def calcular_pot_odds_y_sizing(
@@ -856,9 +878,10 @@ def estimar_equidad_vs_rango(
     opp_archetype: str = "Desconocido",
     iteraciones: Optional[int] = None,
     seed: Optional[int] = None,
+    num_activos: int = 2,
 ) -> float:
     """
-    Estima la equidad [0.0, 1.0] de Hero contra el rango ponderado del rival.
+    Estima la equidad [0.0, 1.0] de Hero contra el rango ponderado del rival (o múltiples rivales en botes multiway).
     Usa enumeración exacta en river (5 comunitarias) o Monte Carlo con Random(seed).
     """
     mis_cartas = parsear_lista_cartas(mis_cartas_str)
@@ -872,19 +895,38 @@ def estimar_equidad_vs_rango(
 
     rng = random.Random(seed)
     n_iter = int(iteraciones or getattr(config, "MONTE_CARLO_ITERATIONS", 250))
+    n_villanos = max(1, min(4, int(num_activos or 2) - 1))
 
-    # River: enumeración exacta sobre muestra o total de combos rivales
+    # River: enumeración exacta o simulación Monte Carlo
     if len(comunitarias) == 5:
         hero_rank = evaluar_fuerza_5_cartas(mis_cartas + comunitarias)
-        muestra = combos_rival if len(combos_rival) <= n_iter else rng.sample(combos_rival, n_iter)
         puntos = 0.0
-        for r1, r2 in muestra:
-            vill_rank = evaluar_fuerza_5_cartas([r1, r2] + comunitarias)
-            if hero_rank > vill_rank:
+        validas = 0
+        for _ in range(n_iter):
+            if len(combos_rival) < n_villanos:
+                break
+            v_combos = rng.sample(combos_rival, n_villanos)
+            cards_v = set()
+            conflict = False
+            for v1, v2 in v_combos:
+                if v1 in cards_v or v2 in cards_v:
+                    conflict = True
+                    break
+                cards_v.add(v1)
+                cards_v.add(v2)
+            if conflict:
+                continue
+
+            vill_ranks = [evaluar_fuerza_5_cartas([v1, v2] + comunitarias) for v1, v2 in v_combos]
+            max_vill_rank = max(vill_ranks)
+            if hero_rank > max_vill_rank:
                 puntos += 1.0
-            elif hero_rank == vill_rank:
-                puntos += 0.5
-        return round(puntos / len(muestra), 4)
+            elif hero_rank == max_vill_rank:
+                count_ties = vill_ranks.count(hero_rank)
+                puntos += 1.0 / (count_ties + 1)
+            validas += 1
+
+        return round(puntos / validas, 4) if validas > 0 else 0.5
 
     # Preflop / Flop / Turn: Monte Carlo con semilla local
     mazo_base = [(r, s) for r in RANKS_DESC for s in SUITS_ALL if (r, s) not in muertas]
@@ -892,18 +934,33 @@ def estimar_equidad_vs_rango(
     puntos = 0.0
     validas = 0
     for _ in range(n_iter):
-        r1, r2 = rng.choice(combos_rival)
-        restantes = [c for c in mazo_base if c != r1 and c != r2]
+        if len(combos_rival) < n_villanos:
+            break
+        v_combos = rng.sample(combos_rival, n_villanos)
+        cards_v = set()
+        conflict = False
+        for v1, v2 in v_combos:
+            if v1 in cards_v or v2 in cards_v:
+                conflict = True
+                break
+            cards_v.add(v1)
+            cards_v.add(v2)
+        if conflict:
+            continue
+
+        restantes = [c for c in mazo_base if c not in cards_v]
         if len(restantes) < faltantes:
             continue
         runout = rng.sample(restantes, faltantes)
         board = comunitarias + runout
         hero_rank = evaluar_fuerza_5_cartas(mis_cartas + board)
-        vill_rank = evaluar_fuerza_5_cartas([r1, r2] + board)
-        if hero_rank > vill_rank:
+        vill_ranks = [evaluar_fuerza_5_cartas([v1, v2] + board) for v1, v2 in v_combos]
+        max_vill_rank = max(vill_ranks)
+        if hero_rank > max_vill_rank:
             puntos += 1.0
-        elif hero_rank == vill_rank:
-            puntos += 0.5
+        elif hero_rank == max_vill_rank:
+            count_ties = vill_ranks.count(hero_rank)
+            puntos += 1.0 / (count_ties + 1)
         validas += 1
 
     return round(puntos / validas, 4) if validas > 0 else 0.5
@@ -912,7 +969,7 @@ def estimar_equidad_vs_rango(
 def decidir_por_ev(dom_data: dict, seed: Optional[int] = None) -> Dict[str, Any]:
     """
     Elige la acción legal de mayor EV (en BB) combinando equidad vs rango, pot odds,
-    fold equity por arquetipo y frecuencias mixtas controladas por semilla.
+    fold equity dinámica por HUD de oponente y frecuencias mixtas controladas por semilla.
     """
     dom = dom_data or {}
     botones = str(dom.get("botones_visibles") or dom.get("opciones_disponibles") or "").upper()
@@ -928,12 +985,16 @@ def decidir_por_ev(dom_data: dict, seed: Optional[int] = None) -> Dict[str, Any]
     a_igualar_bb = float(gto_math.get("a_igualar_bb") or 0.0)
     stack_bb = float(gto_math.get("stack_efectivo_bb") or gto_math.get("mi_stack_bb") or 20.0)
 
-    opp_arq = str((dom.get("perfil_rival") or {}).get("estilo", "Desconocido"))
+    perfil = dom.get("perfil_rival") or {}
+    opp_arq = str(perfil.get("estilo", "Desconocido"))
+    num_activos = len(dom.get("perfiles_oponentes", [])) or (2 if opp_arq else 1)
+
     equidad = estimar_equidad_vs_rango(
         dom.get("mis_cartas", ""),
         dom.get("cartas_comunitarias", ""),
         opp_archetype=opp_arq,
         seed=seed,
+        num_activos=num_activos,
     )
 
     evs: Dict[str, float] = {}
@@ -945,17 +1006,35 @@ def decidir_por_ev(dom_data: dict, seed: Optional[int] = None) -> Dict[str, Any]
         ev_call = equidad * (bote_bb + a_igualar_bb) - (1.0 - equidad) * a_igualar_bb
         evs["CALL"] = round(ev_call, 3)
 
-    # Fold equity según arquetipo rival y presión de apuestas enfrentada
+    # Fold equity ponderada según arquetipo y estadísticas reales del HUD (fold_to_cbet / fold_to_3bet)
     arq_u = opp_arq.upper()
     fe_base = 0.42 if "NIT" in arq_u else (0.15 if "CALLING" in arq_u else 0.30)
+    hud_fold_cbet = float(perfil.get("fold_to_cbet_pct") or 0.0)
+    cbet_opps = int(perfil.get("fold_to_cbet_opportunities") or 0)
+    if cbet_opps >= 3 and hud_fold_cbet > 0:
+        w_hud = min(1.0, cbet_opps / 10.0)
+        fe_base = round(w_hud * (hud_fold_cbet / 100.0) + (1.0 - w_hud) * fe_base, 3)
+
     # Reducir fold equity si el rival ya realizó una apuesta/subida fuerte en la calle actual
     if a_igualar_bb > bote_bb * 1.2:
         fe_base *= 0.35
     elif a_igualar_bb > bote_bb * 0.6:
         fe_base *= 0.60
 
+    # Sizing dinámico adaptado a la textura del tablero
+    textura_info = dom.get("gto_textura") or analizar_textura_mesa_y_blockers(
+        dom.get("mis_cartas", ""), dom.get("cartas_comunitarias", "")
+    )
+    if textura_info.get("posible_color") or textura_info.get("posible_escalera"):
+        sizing_key = "sizing_cbet_fuerte"
+    elif textura_info.get("tablero_emparejado") or "SECA" in str(textura_info.get("textura_mesa", "")).upper():
+        sizing_key = "sizing_cbet_pequeno"
+    else:
+        sizing_key = "sizing_cbet_estandar"
+
+    sizing_chips = int(gto_math.get(sizing_key) or gto_math.get("sizing_cbet_estandar") or round(bb * 2.0))
+
     if "RAISE" in botones or "BET" in botones:
-        sizing_chips = int(gto_math.get("sizing_cbet_estandar") or round(bb * 2.0))
         bet_bb = min(stack_bb, sizing_chips / bb) if stack_bb > 0 else sizing_chips / bb
         ev_raise = fe_base * bote_bb + (1.0 - fe_base) * (
             equidad * (bote_bb + bet_bb + a_igualar_bb) - (1.0 - equidad) * (bet_bb + a_igualar_bb)
@@ -968,13 +1047,18 @@ def decidir_por_ev(dom_data: dict, seed: Optional[int] = None) -> Dict[str, Any]
         )
         evs["ALL_IN"] = round(ev_allin, 3)
 
-    # Control de bote: si CHECK es gratis y la mano es de valor marginal (equidad 0.30 a 0.62 sin pareja ni proyecto fuerte),
-    # priorizar CHECK sobre RAISE para evitar convertir una mano con valor de showdown en farol ineficiente.
-    gto_comb = dom.get("gto_combinacion") or {}
-    cat_str = str(gto_comb.get("categoria", "")).upper()
+    # Control de bote: si CHECK es gratis y la mano no es pareja propia ni conectada con la mesa,
+    # priorizar CHECK sobre RAISE para evitar convertir cartas altas en faroles ineficientes.
+    gto_comb = dom.get("gto_combinacion") or evaluar_combinacion_mano_y_mesa(
+        dom.get("mis_cartas", ""), dom.get("cartas_comunitarias", "")
+    )
     es_pareja_o_mejor = bool(
         gto_comb.get("es_pareja_en_mano")
-        or any(k in cat_str for k in ("PAREJA", "TRIO", "COLOR", "ESCALERA", "FULL", "POKER"))
+        or gto_comb.get("es_top_pair")
+        or gto_comb.get("es_overpair")
+        or (gto_comb.get("coincidencias_mesa") and len(gto_comb.get("coincidencias_mesa")) > 0)
+        or (gto_comb.get("rango_categoria", 0) >= 2 and gto_comb.get("usa_mis_cartas", True))
+        or gto_comb.get("es_pareja_propia_o_conectada")
     )
     tiene_proyecto = bool(gto_comb.get("proyectos"))
 
@@ -994,7 +1078,7 @@ def decidir_por_ev(dom_data: dict, seed: Optional[int] = None) -> Dict[str, Any]
         mejor_accion = "CHECK"
 
     frec = generar_frecuencia_mixta_gto(seed=seed)
-    monto_out = int(gto_math.get("sizing_cbet_estandar") or round(bb * 2.0)) if mejor_accion == "RAISE" else 0
+    monto_out = sizing_chips if mejor_accion == "RAISE" else 0
     return {
         "accion": mejor_accion,
         "monto": monto_out,

@@ -31,8 +31,27 @@ def _extraer_numero(val: Any, default: float = 0.0) -> float:
     if not texto:
         return default
     partes = texto.split("|")
-    m = re.search(r"\d+(?:[.,]\d+)?", partes[0].replace(",", ""))
-    return float(m.group(0)) if m else default
+    tok = partes[0].strip()
+    m = re.search(r"\$?\s*(\d+(?:[.,]\d+)?)", tok)
+    if not m:
+        return default
+    num_str = m.group(1)
+    if "," in num_str and "." in num_str:
+        if num_str.rfind(",") > num_str.rfind("."):
+            num_str = num_str.replace(".", "").replace(",", ".")
+        else:
+            num_str = num_str.replace(",", "")
+    elif "," in num_str:
+        parts = num_str.split(",")
+        if len(parts[-1]) in (1, 2):
+            num_str = num_str.replace(",", ".")
+        else:
+            num_str = num_str.replace(",", "")
+    try:
+        res = float(num_str)
+        return res if res >= 0 else default
+    except Exception:
+        return default
 
 
 def _extraer_acciones_legales(opciones_str: str, to_call: float) -> List[str]:

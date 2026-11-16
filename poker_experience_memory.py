@@ -101,8 +101,16 @@ def _construir_similarity_key(hand_tier: str, board_texture: str, opp_archetype:
         tier_tok = tier_tok.split("(")[0].strip() or tier_tok
     board_tok = _normalizar_textura_token(board_texture)
     opp_raw = (opp_archetype or "DESCONOCIDO").strip().upper()
-    opp_tok = opp_raw.split()[0] if opp_raw else "DESCONOCIDO"
+    if not opp_raw or any(k in opp_raw for k in ("SIN DATOS", "SIN HISTORIAL", "DESCONOCIDO", "DESCONOCIDA", "SIN")):
+        opp_tok = "DESCONOCIDO"
+    else:
+        opp_tok = opp_raw.split()[0] if opp_raw else "DESCONOCIDO"
     return f"{tier_tok}|{board_tok}|{opp_tok}"
+
+
+def _normalizar_street_grupo(street_str: str) -> str:
+    s = (street_str or "PREFLOP").strip().upper()
+    return "POSTFLOP" if s in ("FLOP", "TURN", "RIVER", "POSTFLOP") else "PREFLOP"
 
 
 def _calcular_recency_decay(last_seen_at: Optional[str], half_life_days: float = 14.0) -> float:
@@ -128,16 +136,30 @@ class PokerExperienceMemory:
         if db_path is not None:
             db_path = Path(db_path).resolve()
             db_path.parent.mkdir(parents=True, exist_ok=True)
-            eng = create_engine(
+            self._engine = create_engine(
                 f"sqlite:///{db_path}",
                 connect_args={"check_same_thread": False, "timeout": 30.0},
             )
-            _configure_sqlite_memory(eng)
-            _ensure_schema_migrations(eng)
-            self._session_factory = sessionmaker(bind=eng)
+            _configure_sqlite_memory(self._engine)
+            _ensure_schema_migrations(self._engine)
+            self._session_factory = sessionmaker(bind=self._engine)
         else:
             inicializar_db_memoria()
+            self._engine = engine
             self._session_factory = SessionLocal
+
+    def close(self):
+        if hasattr(self, "_engine") and self._engine:
+            try:
+                self._engine.dispose()
+            except Exception:
+                pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     def registrar_error_pasado(
         self,
@@ -156,6 +178,7 @@ class PokerExperienceMemory:
     ) -> Dict[str, Any]:
         similarity_key = _construir_similarity_key(hand_tier, board_texture, opp_archetype)
         street_norm = (street or "PREFLOP").strip().upper()
+        street_grp = _normalizar_street_grupo(street_norm)
         pos_norm = (position or "DESCONOCIDA").strip().upper()
         action_norm = (action_taken or "").strip().upper()
         bb = max(1.0, float(big_blind or 20.0))
@@ -166,15 +189,19 @@ class PokerExperienceMemory:
 
         with self._lock:
             with closing(self._session_factory()) as session:
-                existente = (
+                candidates = (
                     session.query(ErrorExperiencia)
-                    .filter(
-                        ErrorExperiencia.similarity_key == similarity_key,
-                        ErrorExperiencia.action_taken == action_norm,
-                        ErrorExperiencia.street == street_norm,
-                    )
-                    .first()
+                    .filter(ErrorExperiencia.similarity_key == similarity_key)
+                    .all()
                 )
+                existente = None
+                for c in candidates:
+                    if _normalizar_street_grupo(c.street or "") == street_grp:
+                        c_act = (c.action_taken or "").upper()
+                        if c_act == action_norm or (action_norm in ("BET", "RAISE") and c_act in ("BET", "RAISE")):
+                            existente = c
+                            break
+
                 if existente is not None:
                     existente.occurrences = int(existente.occurrences or 1) + 1
                     existente.total_loss_bb = round(float(existente.total_loss_bb or 0.0) + loss_bb, 3)
