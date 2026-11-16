@@ -2654,7 +2654,7 @@ def main():
                         else:
                             resiliencia.reiniciar_watchdog_mano()
 
-                        current_action_context = (tracker.hand_number, tracker.current_street, float(dom_data.get('a_igualar') or 0.0))
+                        current_action_context = (tracker.hand_number, tracker.current_street, _parse_num_dom(dom_data.get('a_igualar'), 0.0))
 
                         # Prevención de duplicados / Debounce:
                         # 1. Si acabamos de actuar hace <2.5s
@@ -2784,7 +2784,7 @@ def main():
 
                             accion_ejecutada = ejecutar_accion(target_mesa, decision, dom_data=dom_data)
                             tracker.hero_just_acted_ts = time.time()
-                            tracker.hero_last_action_context = (tracker.hand_number, tracker.current_street, float(dom_data.get('a_igualar') or 0.0))
+                            tracker.hero_last_action_context = (tracker.hand_number, tracker.current_street, _parse_num_dom(dom_data.get('a_igualar'), 0.0))
                             log_json_estructurado(
                                 "decision",
                                 hand_id=f"hand_{tracker.hand_number}",

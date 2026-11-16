@@ -2730,7 +2730,7 @@ def crear_app_flask_dashboard(db_path: Path = DB_PATH):
 
 
 def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browser: bool = True) -> None:
-    """Inicia un servidor Flask para el Dashboard de Analíticas."""
+    """Inicia un servidor Flask reactivo en tiempo real en segundo plano."""
     try:
         app = crear_app_flask_dashboard(db_path=db_path)
         url = f"http://127.0.0.1:{port}/dashboard"
@@ -2744,7 +2744,7 @@ def servir_dashboard_http(port: int = 8050, db_path: Path = DB_PATH, open_browse
     except KeyboardInterrupt:
         print("\n🛑 Servidor detenido.")
     except Exception as e:
-        print(f"⚠️ Error al iniciar servidor Flask: {e}")
+        print(f"⚠️ Error iniciando servidor Flask: {e}")
 
 
 _dashboard_server_thread = None
