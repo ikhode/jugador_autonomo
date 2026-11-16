@@ -188,6 +188,69 @@ def ejecutar_simulacion_modelo(nombre_escenario: str, dom_data: dict, modelo_obj
     print("=" * 80 + "\n")
 
 
+def probar_modelos_ml_y_deep_learning(dom_data: dict) -> None:
+    """Demuestra la inferencia real de Scikit-Learn y TensorFlow / Keras (Policy/Value Net, Deep CFR, DQN)."""
+    print("\n" + "🧠 " * 20)
+    print("🔬 PRUEBA DE MODELOS MACHINE LEARNING & DEEP LEARNING (TF / KERAS / SKLEARN)")
+    print("🧠 " * 20)
+
+    from opponent_model import OpponentModel
+    from deep_poker_model import PokerValuePolicyNetwork, DeepCFRSolver, DeepRLDQNAgent
+    from bot import decidir_accion_local
+
+    game_state = {
+        "pot_size": dom_data["bote"],
+        "current_bet": dom_data["a_igualar"],
+        "effective_stack": dom_data["mi_stack"],
+        "mis_cartas": dom_data["mis_cartas"],
+        "cartas_comunitarias": dom_data["cartas_comunitarias"],
+        "posicion": dom_data["posicion"],
+        "perfil_rival": dom_data["perfil_rival"],
+    }
+
+    # 1. Probar Scikit-Learn & XGBoost con Detección de Farol
+    for m_type in ("random_forest", "gradient_boosting", "logistic_regression", "svm", "xgboost"):
+        try:
+            opp_model = OpponentModel(model_type=m_type)
+            opp_model.train_from_database()
+            act_pred = opp_model.predict_opponent_action(game_state, {}, dom_data["perfil_rival"])
+            bluff_p = opp_model.predict_bluff_probability(game_state, {}, dom_data["perfil_rival"])
+            print(f"   • [Scikit-Learn: {m_type}] Predicción Rival: {act_pred['predicted_action']} | Prob Farol: {bluff_p:.2%}")
+        except Exception as e:
+            print(f"   ⚠️ [Scikit-Learn: {m_type}] Warning: {e}")
+
+    # 2. Probar TensorFlow & Keras MLP Policy/Value Network
+    try:
+        policy_net = PokerValuePolicyNetwork()
+        pol_probs, val_ev = policy_net.predict_policy_and_value(game_state)
+        print(f"   • [TensorFlow Keras MLP] EV Predicho: {val_ev:+.2f} BB | Política: {pol_probs}")
+    except Exception as e:
+        print(f"   ⚠️ [TensorFlow Keras MLP] Warning: {e}")
+
+    # 3. Probar Deep CFR (Counterfactual Regret Minimization)
+    try:
+        cfr_solver = DeepCFRSolver()
+        nash_strat = cfr_solver.get_nash_strategy(game_state)
+        print(f"   • [Deep CFR Solver] Estrategia Nash Aproximada: {nash_strat}")
+    except Exception as e:
+        print(f"   ⚠️ [Deep CFR Solver] Warning: {e}")
+
+    # 4. Probar Deep RL DQN Agent
+    try:
+        dqn_agent = DeepRLDQNAgent()
+        action_dqn = dqn_agent.select_action(game_state, legal_actions=["FOLD", "CALL", "RAISE"])
+        print(f"   • [Deep RL DQN Agent] Acción Seleccionada: {action_dqn}")
+    except Exception as e:
+        print(f"   ⚠️ [Deep RL DQN Agent] Warning: {e}")
+
+    # 5. Probar Decisor Local Híbrido en Modo TensorFlow
+    config.ACTIVE_MODEL = "tensorflow-mlp"
+    config.MODO = "tensorflow"
+    local_dec = decidir_accion_local(dom_data)
+    print(f"   • [Decisor Híbrido Local TF] Acción Final: {local_dec.accion} | Evaluación: {local_dec.evaluacion}")
+    print("=" * 80 + "\n")
+
+
 def main():
     print("\n🚀 INICIANDO SIMULACIÓN DE INFERENCIA DE IA & RETRIEVAL EN TIEMPO REAL\n")
 
@@ -215,10 +278,13 @@ def main():
         perfil_rival="Calling Station",
     )
 
-    # 1. Probar Gemini 3.1 Flash Lite
+    # 1. Probar Modelos de Machine Learning y Deep Learning
+    probar_modelos_ml_y_deep_learning(dom_flop)
+
+    # 2. Probar Gemini 3.1 Flash Lite
     ejecutar_simulacion_modelo("1. Preflop Premium vs Maniac", dom_preflop, "gemini-3.1-flash-lite")
 
-    # 2. Probar Cloudflare Workers AI (Llama 3.1 8B)
+    # 3. Probar Cloudflare Workers AI (Llama 3.1 8B)
     ejecutar_simulacion_modelo("2. Flop Top Pair vs Calling Station (Cloudflare Workers AI)", dom_flop, "cf-llama-3.1-8b")
 
     # 3. Probar Cloudflare Workers AI (DeepSeek R1)

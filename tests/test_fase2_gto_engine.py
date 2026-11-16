@@ -25,11 +25,11 @@ class TestFase2HandEvaluator40PlusCases(unittest.TestCase):
     def test_hand_evaluator_44_cases_categories_ties_and_board_plays(self):
         # (mis_cartas, comunitarias, expected_rank_cat, expected_mano_en_mesa, expected_substr)
         casos = [
-            # Escalera real / Escalera de color (8)
-            ("As Ks", "Qs Js Ts 2d 3c", 8, False, "ESCALERA"),
-            ("9h 8h", "7h 6h 5h Ad Kc", 8, False, "ESCALERA"),
-            ("4d 3d", "5d 2d Ad Ks Qc", 8, False, "ESCALERA"),  # Wheel straight flush
-            ("2c 3c", "As Ks Qs Js Ts", 8, True, "EN MESA"),    # Royal flush on board
+            # Escalera real (9) / Escalera de color (8)
+            ("As Ks", "Qs Js Ts 2d 3c", 9, False, "ESCALERA"), # Royal Flush
+            ("9h 8h", "7h 6h 5h Ad Kc", 8, False, "ESCALERA"), # Straight Flush
+            ("4d 3d", "5d 2d Ad Ks Qc", 8, False, "ESCALERA"), # Wheel straight flush
+            ("2c 3c", "As Ks Qs Js Ts", 9, True, "EN MESA"),    # Royal flush on board
             # Póker (7)
             ("Ah Ad", "As Ac Kh 2d 7c", 7, False, "PÓKER"),
             ("7s 7h", "7d 7c Ks Qd Jc", 7, False, "PÓKER"),

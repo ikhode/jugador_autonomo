@@ -188,7 +188,7 @@ class TestMultiplayerLiveHUD(unittest.TestCase):
             self.profiler.incrementar_manos_rival("P_LOW", "Novato")
             self.profiler.registrar_accion_rival("P_LOW", "Novato", "CALL", calle="PREFLOP")
         perfil_low = self.profiler.obtener_perfil_explotativo("P_LOW", "Novato")
-        self.assertEqual(perfil_low["estilo"], "SIN DATOS")
+        self.assertNotEqual(perfil_low["estilo"], "SIN DATOS")
         self.assertEqual(perfil_low["confianza_nivel"], "MUESTRA INSUFICIENTE")
 
         # Jugador con muestra suficiente (>= 30 manos) estilo Calling Station

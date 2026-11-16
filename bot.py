@@ -74,15 +74,22 @@ def log_json_estructurado(
     payload: Optional[dict] = None,
     log_path: Optional[str] = None,
 ) -> dict:
-    """Escribe un evento estructurado en JSONL con hand_id y decision_id."""
+    """Escribe un evento estructurado directamente en SQLite (realtime_game_events) y archivo de respaldo."""
     record = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "event": str(event),
-        "hand_id": str(hand_id or ""),
-        "decision_id": str(decision_id or ""),
+        "event_type": str(event),
+        "hand_uid": str(hand_id or ""),
+        "chosen_action": str(decision_id or ""),
     }
     if isinstance(payload, dict):
         record.update(payload)
+
+    if analytics_logger is not None:
+        try:
+            analytics_logger.registrar_evento_tiempo_real(record)
+        except Exception:
+            pass
+
     target = Path(log_path or getattr(config, "JSON_LOG_PATH", "logs/bot_decisions.jsonl"))
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -540,19 +547,46 @@ JS_VERIFICAR_TURNO_O_MODAL = r"""() => {
 
 JS_EXTRAER_ESTADO_DOM = r"""() => {
     try {
-        const misCartas = Array.from(document.querySelectorAll('.my-player .card-image-backup')).map(c => {
-            const rank = c.querySelector('.card-rank')?.innerText || '';
-            const suit = c.querySelector('.card-suit')?.innerText || '';
-            return (rank + suit).trim();
-        }).filter(Boolean);
+        const getCardStr = (c) => {
+            if (!c) return '';
+            let rank = (c.querySelector('.card-rank')?.innerText || c.querySelector('.card-rank')?.textContent || '').trim();
+            let suit = (c.querySelector('.card-suit')?.innerText || c.querySelector('.card-suit')?.textContent || '').trim();
 
-        const comunitarias = Array.from(document.querySelectorAll('.community-cards .card-image-backup')).map(c => {
-            const rank = c.querySelector('.card-rank')?.innerText || '';
-            const suit = c.querySelector('.card-suit')?.innerText || '';
-            return (rank + suit).trim();
-        }).filter(Boolean);
+            if (!rank || !suit) {
+                const img = c.querySelector('img.card-image, img');
+                const src = img ? (img.getAttribute('src') || '') : '';
+                const fileMatch = src.match(/\/([a-z0-9]+)\.svg$/i);
+                if (fileMatch) {
+                    const code = fileMatch[1].toLowerCase();
+                    if (code.length >= 2) {
+                        const suitChar = code[0];
+                        const rankStr = code.substring(1).toUpperCase();
+                        const suitMap = { 'c': '♣', 'd': '♦', 'h': '♥', 's': '♠' };
+                        if (suitMap[suitChar]) {
+                            suit = suitMap[suitChar];
+                            rank = rankStr === '10' ? '10' : rankStr;
+                        }
+                    }
+                }
+            }
+            if (!rank) return '';
+            if (rank === '10') rank = '10';
+            return (rank + (suit || '')).trim();
+        };
 
-        const bote = (document.querySelector('#main-pot, .total-pot-amount')?.innerText || '').trim();
+        // Mis cartas privadas (Hero)
+        const misCartas = Array.from(document.querySelectorAll('.my-player .card:not(.pt-visibility-hidden), .cards-holder-hero .card:not(.pt-visibility-hidden), .my-player .card-image-backup'))
+            .map(getCardStr)
+            .filter(Boolean);
+
+        // Cartas comunitarias en mesa
+        const comunitarias = Array.from(document.querySelectorAll('.community-cards .cardset-community .card:not(.pt-visibility-hidden)'))
+            .map(getCardStr)
+            .filter(Boolean);
+
+        const bote = (document.querySelector('.total-pot .total-pot-amount, #main-pot:not(.pt-visibility-hidden), .total-pot-amount')?.innerText || '').trim();
+        const mainPotText = (document.querySelector('.main-pot-container #main-pot:not(.pt-visibility-hidden) .amount, #main-pot:not(.pt-visibility-hidden)')?.innerText || '').trim();
+
         const blindsText = (document.querySelector('.blinds-info, .table-blinds, .level-blinds, .blinds')?.innerText || '').trim();
         const blindsMatch = blindsText.match(/(\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)/);
         const bigBlindDom = blindsMatch ? blindsMatch[2].replace(',', '') : '';
@@ -564,7 +598,7 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
 
         const accionesArea = document.querySelector('.actions-area');
         const opcionesAccion = accionesArea
-            ? Array.from(accionesArea.querySelectorAll('.action-button, #FOLD, #CHECK, #CALL, #BET, #RAISE'))
+            ? Array.from(accionesArea.querySelectorAll('.action-button, #FOLD, #CHECK, #CALL, #BET, #RAISE, #ALLIN, .action-fold, .action-check, .action-call, .action-raise, .action-allin'))
                 .filter(b => b.offsetWidth > 0 || b.offsetHeight > 0 || window.getComputedStyle(b).display !== 'none')
                 .map(b => {
                     let id = (b.id || '').toUpperCase();
@@ -586,32 +620,67 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
 
         const esMiTurno = miTimerActivo || opcionesAccion.length > 0;
 
-        const apuestasRivales = Array.from(document.querySelectorAll('.player-area:not(.my-player) .player-bet .amount'))
+        const apuestasRivales = Array.from(document.querySelectorAll('.player-area:not(.my-player) .player-bet .amount, .player-area:not(.my-player) .bet-amount'))
+            .filter(a => {
+                const parentBet = a.closest('.bet, .player-bet');
+                return !parentBet || !parentBet.classList.contains('pt-visibility-hidden');
+            })
             .map(a => a.innerText.trim()).filter(Boolean).join(', ');
 
-        const miStack = (document.querySelector('.my-player .player-chips, .my-player .chips-amount, .my-player .stack-amount, .my-player .player-balance')?.innerText || '0').trim();
-        const stackRival = Array.from(document.querySelectorAll('.player-area:not(.my-player) .player-chips, .player-area:not(.my-player) .chips-amount, .player-area:not(.my-player) .stack-amount, .player-area:not(.my-player) .player-balance'))
+        const miStack = (document.querySelector('.my-player .player-nameplate .amount, .my-player .player-chips, .my-player .chips-amount, .my-player .stack-amount, .my-player .player-balance')?.innerText || '0').trim();
+        const stackRival = Array.from(document.querySelectorAll('.player-area:not(.my-player) .player-nameplate .amount, .player-area:not(.my-player) .player-chips, .player-area:not(.my-player) .chips-amount'))
             .map(el => el.innerText.trim()).filter(Boolean).join(' | ') || '0';
 
         const jugadoresMesa = Array.from(document.querySelectorAll('.player-area')).map((area, idx) => {
             const isHero = area.classList.contains('my-player');
-            let nick = (area.querySelector('.player-name, .nickname, .username')?.innerText || '').trim();
+
+            // Extraction resistente del nickname
+            let nickTarget = area.querySelector('.target, .player-nameplate .nickname, .player-name, .nickname, .username');
+            let nick = (nickTarget ? (nickTarget.innerText || nickTarget.textContent || '') : '').trim();
+
+            // Si el nickname vino como timer ("Time: 18") o número puro, extraerlo del ID del elemento amount de fichas (ej. chips-wallhaxor707"-"4 -> wallhaxor707)
+            if (!nick || /^(Time|Tiempo)[\s:\n]*\d+/i.test(nick) || /^\d+$/.test(nick)) {
+                const amountEl = area.querySelector('.amount, [id*="chips-"]');
+                if (amountEl && amountEl.id) {
+                    const idMatch = amountEl.id.match(/^chips-([^&"'-]+)/i);
+                    if (idMatch && idMatch[1] && !/^(Time|Tiempo)/i.test(idMatch[1])) {
+                        nick = idMatch[1].trim();
+                    }
+                }
+            }
+
             if (isHero && (!nick || /^(Time|Tiempo)[\s:\n]*\d+/i.test(nick))) {
                 nick = 'Belnebu';
             } else if (!nick || /^(Time|Tiempo)[\s:\n]*\d+/i.test(nick) || /^\d+$/.test(nick)) {
                 nick = `Rival_${idx + 1}`;
             }
-            const stackTxt = (area.querySelector('.player-chips, .chips-amount, .stack-amount, .player-balance')?.innerText || '0').trim();
-            const betEl = area.querySelector('.player-bet .amount, .bet-amount, .chip-amount, .bet');
-            const betVal = (betEl ? (betEl.innerText || betEl.textContent || '') : '').replace(/[^\d.]/g, '');
+
+            const stackTxt = (area.querySelector('.player-nameplate .amount, .player-chips, .chips-amount, .stack-amount, .player-balance')?.innerText || '0').trim();
+            const betEl = area.querySelector('.player-bet .amount, .bet-amount, .chip-amount');
+            const parentBetEl = betEl ? betEl.closest('.bet, .player-bet') : null;
+            const betVisible = !parentBetEl || !parentBetEl.classList.contains('pt-visibility-hidden');
+            const betVal = (betEl && betVisible ? (betEl.innerText || betEl.textContent || '') : '').replace(/[^\d.]/g, '');
             const actionEl = area.querySelector('.player-action, .action-label, .action-text, .bubble, .last-action');
             const actionTxt = (actionEl ? (actionEl.innerText || actionEl.textContent || '') : '').trim();
+
+            // HUD Wings VPIP/AF directamente de pantalla
+            const vpipWingsEl = area.querySelector('.hud-wings-value-wrapper:not(.right) .hud-wings-value');
+            const afWingsEl = area.querySelector('.hud-wings-value-wrapper.right .hud-wings-value');
+            const hudVpip = (vpipWingsEl ? (vpipWingsEl.innerText || vpipWingsEl.textContent || '') : '').trim();
+            const hudAf = (afWingsEl ? (afWingsEl.innerText || afWingsEl.textContent || '') : '').trim();
+
             const cls = (area.className || '').toLowerCase();
             const txtArea = (area.innerText || '').toLowerCase();
             const isFold = cls.includes('fold') || txtArea.includes('fold') || txtArea.includes('retir');
             const isEmpty = txtArea.includes('vacío') || txtArea.includes('empty');
             const estado = isEmpty ? 'VACIO' : (isFold ? 'FOLD' : 'ACTIVO');
-            const isDealer = !!area.querySelector('.dealer-button, .dealer-chip, .dealer-badge, .dealer, [class*="dealer"]') || cls.includes('dealer');
+
+            // Dealer button activo si .game-position no tiene .pt-visibility-hidden
+            const posContainer = area.querySelector('.game-position:not(.pt-visibility-hidden)');
+            const isDealer = !!posContainer && !!posContainer.querySelector('.dealer');
+
+            const isTurnAct = isHero ? esMiTurno : (!!area.querySelector('.turn-to-act-indicator') || !!area.querySelector('.text-countdown, .timeout-wrapper'));
+
             return {
                 seat: idx + 1,
                 asiento: idx + 1,
@@ -624,7 +693,9 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
                 estado: estado,
                 is_hero: isHero,
                 is_dealer: isDealer,
-                is_turn: isHero ? esMiTurno : (cls.includes('turn') || cls.includes('active'))
+                is_turn: isTurnAct,
+                hud_vpip: hudVpip,
+                hud_af: hudAf
             };
         }).filter(j => j.estado !== 'VACIO');
 
@@ -2095,15 +2166,10 @@ def get_local_decision_maker():
     global _local_strategic_engine, _local_opponent_model, _local_game_state_mgr, _local_decision_maker
     if _local_decision_maker is None:
         _local_strategic_engine = StrategicEngine(strategy_model=None)
-        _local_opponent_model = OpponentModel(model_type="random_forest")
-        # Train with baseline dummy data if not already trained (10 features)
-        import numpy as np
-        X_train = np.array([
-            [50, 10, 0.166, 0, 0.5, 0.25, 0.15, 1, 2, 0],
-            [200, 50, 0.2, 3, 0.7, 0.25, 0.15, 0, 1, 3]
-        ])
-        y_train = np.array([0, 1])
-        _local_opponent_model.train(X_train, y_train)
+        m_type = getattr(config, "SKLEARN_OPPONENT_MODEL_TYPE", "random_forest")
+        _local_opponent_model = OpponentModel(model_type=m_type)
+        # Entrenar automáticamente leyendo datos históricos reales desde SQLite (poker_stats.db)
+        _local_opponent_model.train_from_database()
         _local_game_state_mgr = GameStateManager()
         _local_decision_maker = DecisionMaker(_local_strategic_engine, _local_opponent_model)
     return _local_game_state_mgr, _local_decision_maker
@@ -2140,7 +2206,12 @@ def decidir_accion_local(dom_data: dict) -> PokerDecision:
     historical_actions = game_state_mgr.get_historical_actions()
     opponent_profile = game_state_mgr.get_opponent_profile()
 
-    decision_res = decision_maker.decidir_accion_hibrida(game_state, historical_actions, opponent_profile)
+    active_mode = config.obtener_modo_activo()
+    tf_mode = getattr(config, "TF_MODEL_TYPE", "mlp_policy_value") if active_mode == "tensorflow" else "gto"
+
+    decision_res = decision_maker.decidir_accion_hibrida(
+        game_state, historical_actions, opponent_profile, model_mode=tf_mode
+    )
     local_action = decision_res["final_action"]
     latency_ms = round((time.perf_counter_ns() - t0_ns) / 1_000_000.0, 3)
 
@@ -2154,8 +2225,9 @@ def decidir_accion_local(dom_data: dict) -> PokerDecision:
     elif "raise" in local_action:
         action_upper = "RAISE" if "RAISE" in str(dom_data.get('botones_visibles', '')).upper() or base_gto_decision.accion == "RAISE" else ("CALL" if current_bet > 0 else "CHECK")
 
-    base_gto_decision.evaluacion = f"⚡ [Local Hybrid AI] Sugerencia: {local_action} -> Ejecutada: {action_upper} ({latency_ms}ms)"
-    base_gto_decision.estrategia_competitiva = "Modelo local híbrido (CFR Base + Random Forest Opponent Modeling)"
+    bluff_prob_str = f" | Bluff Prob: {decision_res.get('bluff_probability', 0.0):.2f}" if "bluff_probability" in decision_res else ""
+    base_gto_decision.evaluacion = f"⚡ [Local Hybrid ML/DL: {active_mode}] Sugerencia: {local_action} -> Ejecutada: {action_upper}{bluff_prob_str} ({latency_ms}ms)"
+    base_gto_decision.estrategia_competitiva = f"Modelo local híbrido (TF/Keras + Scikit-Learn {config.SKLEARN_OPPONENT_MODEL_TYPE})"
     base_gto_decision.accion = action_upper
     base_gto_decision.confianza = 0.95
 
@@ -2479,19 +2551,99 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
             confianza=0.90
         )
 
-    # 4. Defensa activa con Middle/Bottom Pair o rango jugable evaluando Pot Odds y Textura
-    if hay_call:
+    # 4. Apertura y defensa preflop calibrada (Raise or Fold para cerrar la brecha VPIP/PFR)
+    if es_preflop:
         pot_odds_preflop = float(gto_math.get('pot_odds_pct') or 0.0)
-        if es_preflop and (tier in ('S', 'A', 'B') or (tier == 'C' and pot_odds_preflop <= 33.0)):
+        es_open_preflop = a_igualar_bb <= 0.5
+
+        # Si abrimos la mano preflop (sin subida previa de un rival)
+        if es_open_preflop:
+            if tier in ('S', 'A', 'B', 'C') and hay_bet:
+                return PokerDecision(
+                    evaluacion=f"⚡ [0ms GTO] Open Preflop [{tier}] ({desc_mano}). Subida estándar por iniciativa.",
+                    estrategia_competitiva="Apertura con iniciativa preflop",
+                    estado_pantalla="EN_MESA_JUEGO",
+                    es_mi_turno=True,
+                    accion="RAISE",
+                    monto_apuesta=int(gto_math.get('sizing_cbet_estandar') or round(bb * 2.2)),
+                    confianza=0.92
+                )
+            if tier == 'BASURA':
+                if hay_check:
+                    return PokerDecision(
+                        evaluacion=f"⚡ [0ms GTO] Mano basura Preflop [{tier}] ({desc_mano}). Check opción en ciega.",
+                        estrategia_competitiva="Carta gratis en BB",
+                        estado_pantalla="EN_MESA_JUEGO",
+                        es_mi_turno=True,
+                        accion="CHECK",
+                        monto_apuesta=0,
+                        confianza=0.90
+                    )
+                return PokerDecision(
+                    evaluacion=f"⚡ [0ms GTO] Mano basura Preflop [{tier}] ({desc_mano}). Fold disciplinado.",
+                    estrategia_competitiva="Fold de mano sin valor preflop",
+                    estado_pantalla="EN_MESA_JUEGO",
+                    es_mi_turno=True,
+                    accion="FOLD",
+                    monto_apuesta=0,
+                    confianza=0.95
+                )
+
+        # Si enfrentamos una subida/apuesta previa rival
+        if hay_call:
+            if tier in ('S', 'A'):
+                if hay_bet and (a_igualar_bb <= 3.5 or stack_efectivo_bb <= 15.0):
+                    return PokerDecision(
+                        evaluacion=f"⚡ [0ms GTO] Re-subida por valor Preflop [{tier}] ({desc_mano}). 3-Bet / Resubida.",
+                        estrategia_competitiva="3-Bet de valor preflop",
+                        estado_pantalla="EN_MESA_JUEGO",
+                        es_mi_turno=True,
+                        accion="RAISE",
+                        monto_apuesta=int(round(a_igualar_bb * bb * 2.8)),
+                        confianza=0.94
+                    )
+                return PokerDecision(
+                    evaluacion=f"⚡ [0ms GTO] Rango fuerte Preflop [{tier}] ({desc_mano}). Defendiendo inversión con Call.",
+                    estrategia_competitiva="Defensa de rango preflop",
+                    estado_pantalla="EN_MESA_JUEGO",
+                    es_mi_turno=True,
+                    accion="CALL",
+                    monto_apuesta=0,
+                    confianza=0.90
+                )
+            if tier == 'B' and pot_odds_preflop <= 33.0:
+                return PokerDecision(
+                    evaluacion=f"⚡ [0ms GTO] Rango medio Preflop [{tier}] ({desc_mano}). Defendiendo con Call por Pot Odds.",
+                    estrategia_competitiva="Defensa de rango medio",
+                    estado_pantalla="EN_MESA_JUEGO",
+                    es_mi_turno=True,
+                    accion="CALL",
+                    monto_apuesta=0,
+                    confianza=0.86
+                )
+            if tier == 'C' and posicion == 'BB' and pot_odds_preflop <= 22.0:
+                return PokerDecision(
+                    evaluacion=f"⚡ [0ms GTO] Defensa de Ciega Grande [{tier}] ({desc_mano}). Call por precio excelente.",
+                    estrategia_competitiva="Defensa de BB por odds",
+                    estado_pantalla="EN_MESA_JUEGO",
+                    es_mi_turno=True,
+                    accion="CALL",
+                    monto_apuesta=0,
+                    confianza=0.82
+                )
+            # Fold disciplinado ante subidas para Tier C fuera de BB y Basura
             return PokerDecision(
-                evaluacion=f"⚡ [0ms GTO] Rango jugable Preflop [{tier}] ({desc_mano}). Defendiendo inversión con Call.",
-                estrategia_competitiva="Defensa de rango preflop",
+                evaluacion=f"⚡ [0ms GTO] Mano débil vs subida Preflop [{tier}] ({desc_mano}). Fold disciplinado.",
+                estrategia_competitiva="Fold disciplinado preflop",
                 estado_pantalla="EN_MESA_JUEGO",
                 es_mi_turno=True,
-                accion="CALL",
+                accion="FOLD",
                 monto_apuesta=0,
-                confianza=0.88
+                confianza=0.90
             )
+
+    # 5. Defensa postflop activa con Middle/Bottom Pair o rango jugable evaluando Pot Odds y Textura
+    if hay_call:
         max_pot_odds_call = 28.0 if textura_peligrosa else 38.0
         if es_mano_jugable and not mano_en_mesa and pot_odds_pct <= max_pot_odds_call:
             return PokerDecision(

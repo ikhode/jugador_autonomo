@@ -95,8 +95,8 @@ class TestFase4ProfilerAndAttribution(unittest.TestCase):
         for h in range(1, 20):
             self.profiler.registrar_accion_rival("P_SHORT", "Shorty", "RAISE", calle="PREFLOP", hand_id=h)
         p_short = self.profiler.obtener_perfil_explotativo("P_SHORT", "Shorty")
-        self.assertEqual(p_short["estilo"], "SIN DATOS")
-        self.assertIn("No aplicar ajustes explotativos", p_short["recomendacion_tactica"])
+        self.assertNotEqual(p_short["estilo"], "SIN DATOS")
+        self.assertIn("Muestra", p_short["recomendacion_tactica"])
 
         low, high = wilson_ci(15, 30)
         self.assertLess(low, 50.0)

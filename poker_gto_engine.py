@@ -389,22 +389,24 @@ def _rank_5_cartas(cinco: Tuple[Tuple[str, str], ...]) -> Tuple[int, ...]:
     orden_vals = [g[0] for g in grupos]
 
     if is_straight and is_flush:
-        return (8, straight_high)
+        if straight_high == 14:
+            return (9, 14)  # Escalera Real (Royal Flush: 10, J, Q, K, A del mismo palo)
+        return (8, straight_high)  # Escalera de Color (Straight Flush)
     if freq[0] == 4:
-        return (7, orden_vals[0], orden_vals[1])
+        return (7, orden_vals[0], orden_vals[1])  # Póker (Four of a Kind)
     if freq[0] == 3 and freq[1] == 2:
-        return (6, orden_vals[0], orden_vals[1])
+        return (6, orden_vals[0], orden_vals[1])  # Full House (Full)
     if is_flush:
-        return (5, *vals)
+        return (5, *vals)  # Color (Flush)
     if is_straight:
-        return (4, straight_high)
+        return (4, straight_high)  # Escalera (Straight)
     if freq[0] == 3:
-        return (3, orden_vals[0], orden_vals[1], orden_vals[2])
+        return (3, orden_vals[0], orden_vals[1], orden_vals[2])  # Trío (Three of a Kind)
     if freq[0] == 2 and freq[1] == 2:
-        return (2, orden_vals[0], orden_vals[1], orden_vals[2])
+        return (2, orden_vals[0], orden_vals[1], orden_vals[2])  # Doble pareja (Two Pair)
     if freq[0] == 2:
-        return (1, orden_vals[0], orden_vals[1], orden_vals[2], orden_vals[3])
-    return (0, *vals)
+        return (1, orden_vals[0], orden_vals[1], orden_vals[2], orden_vals[3])  # Pareja (One Pair)
+    return (0, *vals)  # Carta alta (High Card)
 
 
 def evaluar_fuerza_5_cartas(cartas: List[Tuple[str, str]]) -> Tuple[int, ...]:
@@ -581,8 +583,8 @@ def evaluar_combinacion_mano_y_mesa(mis_cartas_str: str, comunitarias_str: str) 
             rank_cat = 0
             score_tuple = (0, *vals)
 
-    es_color = (rank_cat == 5 or rank_cat == 8) and not mano_en_mesa
-    es_escalera = (rank_cat == 4 or rank_cat == 8) and not mano_en_mesa
+    es_color = (rank_cat == 5 or rank_cat in (8, 9)) and not mano_en_mesa
+    es_escalera = (rank_cat == 4 or rank_cat in (8, 9)) and not mano_en_mesa
     es_set = False
     es_trips = False
     es_doble_pareja = (rank_cat == 2) and not mano_en_mesa
@@ -594,6 +596,7 @@ def evaluar_combinacion_mano_y_mesa(mis_cartas_str: str, comunitarias_str: str) 
 
     if mano_en_mesa:
         nombres_cat = {
+            9: "ESCALERA REAL EN MESA",
             8: "ESCALERA DE COLOR EN MESA",
             7: "PÓKER EN MESA",
             6: "FULL HOUSE EN MESA",
@@ -606,8 +609,11 @@ def evaluar_combinacion_mano_y_mesa(mis_cartas_str: str, comunitarias_str: str) 
         }
         categoria = nombres_cat.get(rank_cat, "MANO EN MESA")
         descripcion = "La mejor mano de 5 cartas juega exclusivamente en la mesa comunitaria."
+    elif rank_cat == 9:
+        categoria = "ESCALERA REAL (Royal Flush) - MEJOR MANO POSIBLE"
+        descripcion = "Escalera Real (10, J, Q, K, A del mismo palo) completada. Mano imbatible."
     elif rank_cat == 8:
-        categoria = "ESCALERA REAL / DE COLOR - MONSTRUO"
+        categoria = "ESCALERA DE COLOR (Straight Flush) - MONSTRUO"
         descripcion = "Escalera de color completada usando cartas privadas."
     elif rank_cat == 7:
         categoria = "PÓKER (Four of a Kind) - MONSTRUO"
