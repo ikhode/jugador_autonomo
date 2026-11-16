@@ -30,7 +30,10 @@ except Exception:
 
 
 LEGAL_PLAY_ACTIONS = ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN")
-ALL_ACTIONS = ("FOLD", "CHECK", "CALL", "RAISE", "BET", "APOSTAR", "ALL_IN", "ALLIN", "REPLAY", "START_GAME", "WAIT")
+ALL_ACTIONS = (
+    "FOLD", "CHECK", "CALL", "RAISE", "BET", "APOSTAR", "SUBIR", "IGUALAR",
+    "PAGAR", "PASAR", "RETIRAR", "RETIRARSE", "ALL_IN", "ALLIN", "REPLAY", "START_GAME", "WAIT"
+)
 
 
 class PokerDecision(BaseModel):
@@ -209,6 +212,11 @@ def build_table_input(dom_data: Optional[dict], decision_uid: str = "", hand_uid
     raw_opts = str(dom.get("opciones_disponibles") or dom.get("botones_visibles") or "").upper()
     raw_norm = re.sub(r"\bALL[\s\-_]+IN\b", "ALL_IN", raw_opts, flags=re.I)
     raw_norm = re.sub(r"\bALLIN\b", "ALL_IN", raw_norm, flags=re.I)
+    raw_norm = re.sub(r"\b(SUBIR)\b", "RAISE", raw_norm, flags=re.I)
+    raw_norm = re.sub(r"\b(APOSTAR)\b", "BET", raw_norm, flags=re.I)
+    raw_norm = re.sub(r"\b(IGUALAR|PAGAR)\b", "CALL", raw_norm, flags=re.I)
+    raw_norm = re.sub(r"\bPASAR\b", "CHECK", raw_norm, flags=re.I)
+    raw_norm = re.sub(r"\b(RETIRARSE|RETIRAR)\b", "FOLD", raw_norm, flags=re.I)
     raw_norm = re.sub(r"[,|;]+", " ", raw_norm)
     toks = [tok.strip() for tok in raw_norm.split() if tok.strip()]
     opts = [t for t in toks if t in ALL_ACTIONS]
@@ -352,6 +360,12 @@ def validate_legality(decision: PokerDecision, table_input: PokerTableInput) -> 
         opts.add("ALL_IN")
     if "ALL_IN" in opts:
         opts.add("ALLIN")
+    if any(b in opts for b in ("CALL", "IGUALAR", "PAGAR")):
+        opts.add("CALL")
+    if any(b in opts for b in ("CHECK", "PASAR")):
+        opts.add("CHECK")
+    if any(b in opts for b in ("FOLD", "RETIRAR", "RETIRARSE")):
+        opts.add("FOLD")
 
     if acc == "FOLD" and "CHECK" in opts and table_input.a_igualar_bb <= 0:
         decision.accion = "CHECK"
@@ -362,7 +376,7 @@ def validate_legality(decision: PokerDecision, table_input: PokerTableInput) -> 
         return False, decision, f"illegal_passive_action:{acc}"
 
     if opts and acc not in opts:
-        if acc in ("RAISE", "BET") and any(b in opts for b in ("BET", "RAISE", "APOSTAR")):
+        if acc in ("RAISE", "BET") and any(b in opts for b in ("BET", "RAISE", "APOSTAR", "SUBIR")):
             return True, decision, "raise_as_bet"
         if acc == "CALL" and "CHECK" in opts and table_input.a_igualar_bb <= 0:
             decision.accion = "CHECK"

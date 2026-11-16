@@ -567,8 +567,18 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             ? Array.from(accionesArea.querySelectorAll('.action-button, #FOLD, #CHECK, #CALL, #BET, #RAISE'))
                 .filter(b => b.offsetWidth > 0 || b.offsetHeight > 0 || window.getComputedStyle(b).display !== 'none')
                 .map(b => {
-                    const id = b.id || 'BTN';
-                    const titulo = (b.querySelector('.action-title')?.innerText || b.innerText || '').replace(/\s+/g, ' ').trim();
+                    let id = (b.id || '').toUpperCase();
+                    if (!id || id === 'BTN') {
+                        const cls = (b.className || '').toLowerCase();
+                        const txt = (b.querySelector('.action-title')?.innerText || b.innerText || '').toUpperCase();
+                        if (cls.includes('raise') || txt.includes('RAISE') || txt.includes('SUBIR')) id = 'RAISE';
+                        else if (cls.includes('bet') || txt.includes('BET') || txt.includes('APOSTAR')) id = 'BET';
+                        else if (cls.includes('call') || txt.includes('CALL') || txt.includes('IGUALAR') || txt.includes('PAGAR')) id = 'CALL';
+                        else if (cls.includes('check') || txt.includes('CHECK') || txt.includes('PASAR')) id = 'CHECK';
+                        else if (cls.includes('fold') || txt.includes('FOLD') || txt.includes('RETIRAR')) id = 'FOLD';
+                        else if (cls.includes('allin') || txt.includes('ALL-IN') || txt.includes('ALL IN')) id = 'ALL_IN';
+                        else id = 'BTN';
+                    }
                     const valor = (b.querySelector('.action-value')?.innerText || '').trim();
                     return `${id}${valor ? ' (' + valor + ')' : ''}`;
                 })
@@ -1674,37 +1684,119 @@ def salir_de_mesa_vacia_o_finalizada(target_mesa, page, context) -> bool:
 
 import random
 
-def aplicar_delay_humanizado(accion: str, dom_data: Optional[dict] = None) -> float:
+def aplicar_delay_humanizado(accion: str, dom_data: Optional[dict] = None, tiempo_ia_seg: float = 0.0) -> float:
     """
-    Aplica una pausa aleatoria realista (jitter) antes de hacer clic en el DOM
-    para simular tiempo de reflexión humano y evitar patrones robóticos.
+    Aplica una pausa calculada y realista para simular tiempo de reflexión humano
+    de clase mundial (World-Class Human Timing Engine).
+    Compensa el tiempo ya transcurrido en inferencia/red para que el tiempo total de turno
+    se ajuste a una distribución humana realista (2.5s - 7.5s) según calle, acción y tamaño del bote.
     """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return 0.01
+
     dom = dom_data or {}
-    street = (dom.get("gto_preflop") or {}).get("situacion") or str(dom.get("street") or "PREFLOP")
-    tier = (dom.get("gto_preflop") or {}).get("tier", "DESCONOCIDO")
+    street = str((dom.get("gto_preflop") or {}).get("situacion") or dom.get("street") or "PREFLOP").upper()
+    tier = str((dom.get("gto_preflop") or {}).get("tier") or "DESCONOCIDO").upper()
+    gto_math = dom.get("gto_math") or {}
+    bote_bb = float(gto_math.get("bote_bb") or 0.0)
+    a_igualar_bb = float(gto_math.get("a_igualar_bb") or 0.0)
 
-    if accion == "FOLD":
-        if tier in ("BASURA", "C"):
-            delay = random.uniform(0.4, 0.8)
+    # 1. Determinar target_mean y sigma según la complejidad del spot
+    if "PREFLOP" in street:
+        if accion == "FOLD":
+            target_mean = 2.8 if tier in ("BASURA", "C") else 3.5
+            sigma = 0.4
+        elif accion == "CHECK":
+            target_mean = 2.6
+            sigma = 0.35
+        elif accion == "CALL":
+            target_mean = 3.3
+            sigma = 0.5
+        elif accion in ("RAISE", "BET"):
+            target_mean = 4.0
+            sigma = 0.6
+        elif accion in ("ALL_IN", "ALLIN"):
+            target_mean = 5.2
+            sigma = 0.8
         else:
-            delay = random.uniform(0.9, 1.6)
-    elif accion in ("CHECK", "CALL"):
-        if street == "PREFLOP":
-            delay = random.uniform(0.6, 1.2)
+            target_mean = 3.0
+            sigma = 0.5
+    elif "FLOP" in street:
+        if accion == "CHECK":
+            target_mean = 3.2
+            sigma = 0.5
+        elif accion in ("CALL", "BET"):
+            target_mean = 4.0
+            sigma = 0.6
+        elif accion in ("RAISE", "ALL_IN", "ALLIN"):
+            target_mean = 5.4
+            sigma = 0.8
+        elif accion == "FOLD":
+            target_mean = 3.4
+            sigma = 0.5
         else:
-            delay = random.uniform(1.1, 2.0)
-    elif accion in ("RAISE", "BET", "ALL_IN", "ALLIN"):
-        if tier in ("S", "A"):
-            delay = random.uniform(1.2, 2.4)
+            target_mean = 3.5
+            sigma = 0.5
+    elif "TURN" in street:
+        if accion == "CHECK":
+            target_mean = 3.8
+            sigma = 0.6
+        elif accion in ("CALL", "BET"):
+            target_mean = 4.6
+            sigma = 0.7
+        elif accion in ("RAISE", "ALL_IN", "ALLIN"):
+            target_mean = 6.0
+            sigma = 0.9
+        elif accion == "FOLD":
+            target_mean = 4.2
+            sigma = 0.6
         else:
-            delay = random.uniform(1.8, 3.2)
-    else:
-        delay = random.uniform(0.4, 0.8)
+            target_mean = 4.0
+            sigma = 0.6
+    else:  # RIVER
+        if accion == "CHECK":
+            target_mean = 4.8
+            sigma = 0.7
+        elif accion in ("CALL", "BET"):
+            target_mean = 5.8
+            sigma = 0.9
+        elif accion in ("RAISE", "ALL_IN", "ALLIN"):
+            target_mean = 6.8
+            sigma = 1.0
+        elif accion == "FOLD":
+            target_mean = 5.0
+            sigma = 0.8
+        else:
+            target_mean = 5.0
+            sigma = 0.7
 
-    time.sleep(delay)
-    return delay
+    # Si el bote es grande o enfrentamos una apuesta pesada, sumar reflexión extra
+    if bote_bb >= 6.0 or a_igualar_bb >= 4.0:
+        target_mean *= 1.25
 
-def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
+    # Simulación de "Tanking" ocasional (10% de probabilidad en spots complejos)
+    if random.random() < 0.10 and ("PREFLOP" not in street or a_igualar_bb > 2.0):
+        target_mean += random.uniform(1.5, 2.5)
+
+    duracion_objetivo = random.gauss(target_mean, sigma)
+    duracion_objetivo = max(2.2, min(8.5, duracion_objetivo))
+
+    pausa_adicional = duracion_objetivo - max(0.0, tiempo_ia_seg)
+    pausa_final = max(0.65, pausa_adicional)
+
+    # Guardia de tiempo restante del timebank de iPoker
+    tiempo_mesa_str = str(dom.get("tiempo_restante", "")).strip()
+    m_tiempo = re.search(r"(\d+)", tiempo_mesa_str)
+    if m_tiempo:
+        tiempo_mesa = float(m_tiempo.group(1))
+        if tiempo_mesa > 3.0:
+            pausa_final = min(pausa_final, tiempo_mesa - 2.5)
+
+    pausa_final = round(max(0.1, pausa_final), 2)
+    time.sleep(pausa_final)
+    return pausa_final
+
+def ejecutar_accion(target, decision, dom_data: Optional[dict] = None, tiempo_ia_seg: float = 0.0) -> str:
     target_url = ""
     try:
         u = getattr(target, "url", "")
@@ -1729,8 +1821,8 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
 
     # Humanizar tiempos de respuesta (pausa realista pre-clic)
     if accion in ("FOLD", "CHECK", "CALL", "RAISE", "BET", "ALL_IN", "ALLIN"):
-        delay_sec = aplicar_delay_humanizado(accion, dom_data=dom_data)
-        print(f"🧠 [HUMAN TIMING] Pausa de reflexión: {delay_sec:.2f}s")
+        delay_sec = aplicar_delay_humanizado(accion, dom_data=dom_data, tiempo_ia_seg=tiempo_ia_seg)
+        print(f"🧠 [HUMAN TIMING] Reflexión humana: {delay_sec:.2f}s (IA previa: {tiempo_ia_seg:.2f}s | Turno total: {tiempo_ia_seg + delay_sec:.2f}s)")
 
     btn_fold = config.SELECTORS.get("btn_fold", config.SELECTORS["fold"])
     btn_check = config.SELECTORS.get("btn_check", config.SELECTORS["check"])
@@ -2329,7 +2421,12 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
             confianza=0.88
         )
 
-    accion_fallback = "CHECK" if hay_check else ("CALL" if hay_call or es_mano_jugable else ("FOLD" if "FOLD" in botones else "CALL"))
+    if hay_check:
+        accion_fallback = "CHECK"
+    elif es_mano_jugable or es_mano_fuerte:
+        accion_fallback = "CALL" if (hay_call or "CALL" in botones or "IGUALAR" in botones) else "FOLD"
+    else:
+        accion_fallback = "FOLD" if ("FOLD" in botones or "RETIRAR" in botones or "RETIRARSE" in botones) else ("CHECK" if hay_check else "CALL")
     return PokerDecision(
         evaluacion=f"⚡ [0ms GTO] Acción rápida fallback: {accion_fallback}",
         estrategia_competitiva="Acción defensiva automática",
@@ -2895,7 +2992,7 @@ def main():
                             dt = time.time() - t0
                             print(f"⚡ [DECISIÓN IA ({dt:.2f}s)]: {decision.accion} | Confianza: {decision.confianza:.2f} | {decision.evaluacion}")
 
-                            accion_ejecutada = ejecutar_accion(target_mesa, decision, dom_data=dom_data)
+                            accion_ejecutada = ejecutar_accion(target_mesa, decision, dom_data=dom_data, tiempo_ia_seg=dt)
                             tracker.hero_just_acted_ts = time.time()
                             tracker.hero_last_action_context = (tracker.hand_number, tracker.current_street, _parse_num_dom(dom_data.get('a_igualar'), 0.0))
                             log_json_estructurado(

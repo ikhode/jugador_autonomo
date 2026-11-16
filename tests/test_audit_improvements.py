@@ -133,3 +133,115 @@ def test_two_pair_coordinated_board_sizing():
     assert dec.accion in ("RAISE", "BET")
     # Sizing debe ser agresivo por valor (~67% del bote: >= 130 fichas)
     assert dec.monto_apuesta >= 120
+
+
+def test_wait_recovery_via_fallback_layer():
+    from ai_layer import AILayer, ModelPolicy
+    from bot import decidir_accion_rapida
+
+    # 1. LLM propuso WAIT pero había CHECK gratis disponible
+    layer = AILayer(
+        policy=ModelPolicy(models=["m1"]),
+        model_callable=lambda _m, _c, _t: ('{"evaluacion":"esperar","estrategia_competitiva":"","estado_pantalla":"EN_MESA_JUEGO","es_mi_turno":true,"accion":"WAIT","monto_apuesta":0,"confianza":0.9}', 20, 10),
+        fallback_fn=decidir_accion_rapida,
+        use_genkit=False,
+    )
+    dom_check = {
+        "es_mi_turno": True,
+        "mis_cartas": "7♦ 3♥",
+        "cartas_comunitarias": "4♠ 6♦ A♦",
+        "bote": 40,
+        "a_igualar": 0,
+        "opciones_disponibles": "CHECK | BET | RAISE",
+        "botones_visibles": "CHECK | BET | RAISE",
+    }
+    res_check = layer.decidir(dom_data=dom_check)
+    assert res_check.decision.accion == "CHECK"
+
+    # 2. LLM propuso WAIT pero enfrentaba apuesta con basura (72o en mesa seca sin draw): fallback debe foldear, nunca pagar
+    dom_bet = {
+        "es_mi_turno": True,
+        "mis_cartas": "7♣ 2♥",
+        "cartas_comunitarias": "J♠ 8♦ 4♣",
+        "bote": 80,
+        "a_igualar": 40,
+        "opciones_disponibles": "FOLD | CALL | RAISE",
+        "botones_visibles": "FOLD | CALL | RAISE",
+        "situacion": "vs_raise",
+    }
+    res_bet = layer.decidir(dom_data=dom_bet)
+    assert res_bet.decision.accion == "FOLD"
+
+
+def test_validate_legality_spanish_and_bet_raise_synonyms():
+    from ai_layer import validate_legality, PokerDecision, build_table_input
+
+    # Botones en español con SUBIR (40)
+    dom_es = {
+        "es_mi_turno": True,
+        "opciones_disponibles": "FOLD | CHECK | SUBIR (40)",
+        "a_igualar": 0,
+    }
+    t_input = build_table_input(dom_es)
+    assert "RAISE" in t_input.opciones_legales
+
+    dec_raise = PokerDecision(
+        evaluacion="Subir por valor",
+        estrategia_competitiva="Agresiva",
+        estado_pantalla="EN_MESA_JUEGO",
+        es_mi_turno=True,
+        accion="RAISE",
+        monto_apuesta=40,
+        confianza=0.9,
+    )
+    is_legal, res_dec, note = validate_legality(dec_raise, t_input)
+    assert is_legal is True
+    assert res_dec.accion == "RAISE"
+
+
+def test_decidir_accion_rapida_weak_hand_facing_bet_folds():
+    # Mano basura preflop (73o) enfrentando apuesta sin opción de check
+    dom_weak = {
+        "es_mi_turno": True,
+        "mis_cartas": "7♣ 3♥",
+        "cartas_comunitarias": "",
+        "bote": 90,
+        "a_igualar": 30,
+        "mi_stack": 470,
+        "stack_rival": 500,
+        "big_blind": 20,
+        "opciones_disponibles": "FOLD | CALL | RAISE",
+        "botones_visibles": "FOLD | CALL | RAISE",
+        "situacion": "vs_raise",
+    }
+    dec = decidir_accion_rapida(dom_weak)
+    # Debe foldear obligatoriamente para proteger stack, NUNCA pagar
+    assert dec.accion == "FOLD"
+
+
+def test_human_timing_delay_calculation():
+    import os
+    from bot import aplicar_delay_humanizado
+
+    # Con PYTEST_CURRENT_TEST activo retorna 0.01s inmediatamente
+    fast_delay = aplicar_delay_humanizado("FOLD", dom_data={"street": "PREFLOP"}, tiempo_ia_seg=1.0)
+    assert fast_delay == 0.01
+
+    # Desactivamos temporalmente el flag para probar la lógica matemática real sin dormir
+    orig = os.environ.pop("PYTEST_CURRENT_TEST", None)
+    try:
+        import unittest.mock as mock
+        with mock.patch("time.sleep") as mock_sleep:
+            # Caso 1: Preflop Fold con IA rápida (0.5s) -> delay debe compensar hasta ~2.5-4s
+            d1 = aplicar_delay_humanizado("FOLD", dom_data={"street": "PREFLOP", "gto_preflop": {"tier": "BASURA"}}, tiempo_ia_seg=0.5)
+            assert d1 >= 0.65
+            mock_sleep.assert_called()
+
+            # Caso 2: River Bet/Call con IA que tardó 2.0s -> delay humano profundo
+            d2 = aplicar_delay_humanizado("CALL", dom_data={"street": "RIVER", "gto_math": {"bote_bb": 10.0, "a_igualar_bb": 5.0}}, tiempo_ia_seg=2.0)
+            assert d2 >= 1.5
+            total_turn_time = 2.0 + d2
+            assert 3.5 <= total_turn_time <= 8.5
+    finally:
+        if orig is not None:
+            os.environ["PYTEST_CURRENT_TEST"] = orig
