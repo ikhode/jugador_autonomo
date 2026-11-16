@@ -58,6 +58,13 @@ PLAY_MONEY_ONLY = os.getenv("PLAY_MONEY_ONLY", "true").lower() == "true"
 CDP_PORT = int(os.getenv("CDP_PORT", "9222"))
 SLOW_MO = int(os.getenv("SLOW_MO", "100"))
 
+# Humanización y Pacing de Acciones (World-Class Human Timing Engine)
+HUMAN_TIMING_ENABLED = os.getenv("HUMAN_TIMING_ENABLED", "true").lower() == "true"
+HUMAN_MIN_DELAY_SEC = float(os.getenv("HUMAN_MIN_DELAY_SEC", "1.5"))
+HUMAN_MAX_DELAY_SEC = float(os.getenv("HUMAN_MAX_DELAY_SEC", "8.5"))
+HUMAN_PRE_CLICK_PAUSE_MS = int(os.getenv("HUMAN_PRE_CLICK_PAUSE_MS", "220"))
+HUMAN_CLICK_DURATION_MS = int(os.getenv("HUMAN_CLICK_DURATION_MS", "85"))
+
 USER_DATA_DIR = Path("browser_profile")
 
 # Configuración de Modalidad y Mesa para Live HUD Multijugador

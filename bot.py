@@ -731,15 +731,47 @@ def esperar_carga_dom(target, timeout_ms: int = 5000):
     except Exception:
         pass
 
+def aplicar_pausa_pre_clic(elem=None, descripcion: str = "") -> float:
+    """
+    Simula la micro-pausa neuromuscular y el movimiento/hover previo al clic
+    de un jugador humano real (World-Class Pre-Click Timing).
+    Introduce una pausa realista (120ms - 280ms) y hace hover sobre el elemento.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return 0.0
+    if not getattr(config, "HUMAN_TIMING_ENABLED", True):
+        return 0.0
+
+    base_ms = int(getattr(config, "HUMAN_PRE_CLICK_PAUSE_MS", 220))
+    # Variación gaussiana suave para evitar patrones mecánicos predecibles
+    pre_ms = max(80, min(450, int(random.gauss(base_ms, 35))))
+    delay_sec = round(pre_ms / 1000.0, 3)
+
+    if elem is not None:
+        try:
+            elem.hover(timeout=250)
+        except Exception:
+            pass
+
+    time.sleep(delay_sec)
+    return delay_sec
+
+
 def intentar_click(target, selector: str, descripcion: str, timeout: int = 4000) -> bool:
     selectores = [s.strip() for s in selector.split(",") if s.strip()]
+    is_test = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    click_dur = 0 if is_test else int(getattr(config, "HUMAN_CLICK_DURATION_MS", 85))
+    if click_dur > 0:
+        click_dur = max(45, min(160, int(random.gauss(click_dur, 15))))
+
     # Paso rápido (0ms): verificar si alguno de los selectores ya es visible ahora mismo
     for sel in selectores:
         try:
             elem = target.locator(sel).first
             if elem.is_visible():
                 elem.wait_for(state="visible", timeout=500)
-                elem.click(timeout=1200)
+                aplicar_pausa_pre_clic(elem, descripcion)
+                elem.click(timeout=1200, delay=click_dur)
                 print(f"✅ [CLIC OK] Clic en {descripcion} realizado.")
                 return True
         except Exception:
@@ -756,26 +788,33 @@ def intentar_click(target, selector: str, descripcion: str, timeout: int = 4000)
             try:
                 elem = target.locator(sel).first
                 if elem.is_visible():
-                    elem.click(timeout=1200)
+                    aplicar_pausa_pre_clic(elem, descripcion)
+                    elem.click(timeout=1200, delay=click_dur)
                     print(f"✅ [CLIC OK] Clic en {descripcion} realizado.")
                     return True
             except Exception:
                 pass
 
             if not sel.startswith("xpath=") and ":has-text(" not in sel:
-                clicked = target.evaluate("""(selector) => {
+                aplicar_pausa_pre_clic(None, descripcion)
+                clicked = target.evaluate("""({selector, clickDur}) => {
                     try {
                         const el = document.querySelector(selector);
                         if (el && !el.disabled && el.getAttribute('aria-disabled') !== 'true') {
                             el.scrollIntoView({ block: 'center' });
+                            el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
                             el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                            if (clickDur > 0) {
+                                const start = performance.now();
+                                while (performance.now() - start < clickDur) {}
+                            }
                             el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
                             el.click();
                             return true;
                         }
                     } catch (e) {}
                     return false;
-                }""", sel)
+                }""", {"selector": sel, "clickDur": click_dur})
 
                 if clicked:
                     print(f"⚡ [JS CLICK OK] Clic por evento JS realizado en {descripcion}.")
@@ -1604,7 +1643,13 @@ def clicar_texto_modal_universal(target, textos: list[str], descripcion: str = "
     y dispara eventos reales de ratón + click(). Funciona aunque el botón en iPoker sea un <div> o <span>.
     """
     try:
-        clicado = target.evaluate("""({textos, solo_modal}) => {
+        aplicar_pausa_pre_clic(None, descripcion)
+        is_test = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        click_dur = 0 if is_test else int(getattr(config, "HUMAN_CLICK_DURATION_MS", 85))
+        if click_dur > 0:
+            click_dur = max(45, min(160, int(random.gauss(click_dur, 15))))
+
+        clicado = target.evaluate("""({textos, solo_modal, clickDur}) => {
             if (!document.body) return false;
             const elementos = Array.from(document.querySelectorAll('button, div, span, a, [role="button"]'));
             // Preferir coincidencia exacta en el nodo más interno visible
@@ -1617,7 +1662,12 @@ def clicar_texto_modal_universal(target, textos: list[str], descripcion: str = "
                 });
                 if (exactos.length > 0) {
                     const btn = exactos[exactos.length - 1];
+                    btn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
                     btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    if (clickDur > 0) {
+                        const start = performance.now();
+                        while (performance.now() - start < clickDur) {}
+                    }
                     btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
                     btn.click();
                     return true;
@@ -1634,14 +1684,19 @@ def clicar_texto_modal_universal(target, textos: list[str], descripcion: str = "
                 if (parciales.length > 0) {
                     // Seleccionar el nodo más interno/específico que contiene el texto
                     const btn = parciales.sort((a, b) => (a.clientWidth * a.clientHeight) - (b.clientWidth * b.clientHeight))[0];
+                    btn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
                     btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    if (clickDur > 0) {
+                        const start = performance.now();
+                        while (performance.now() - start < clickDur) {}
+                    }
                     btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
                     btn.click();
                     return true;
                 }
             }
             return false;
-        }""", {"textos": textos, "solo_modal": solo_modal})
+        }""", {"textos": textos, "solo_modal": solo_modal, "clickDur": click_dur})
         if clicado:
             print(f"✅ [CLIC DE TEXTO OK] Clic realizado en '{descripcion}'.")
             return True
@@ -1735,6 +1790,9 @@ def aplicar_delay_humanizado(accion: str, dom_data: Optional[dict] = None, tiemp
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return 0.01
 
+    if not getattr(config, "HUMAN_TIMING_ENABLED", True):
+        return 0.0
+
     dom = dom_data or {}
     street = str((dom.get("gto_preflop") or {}).get("situacion") or dom.get("street") or "PREFLOP").upper()
     tier = str((dom.get("gto_preflop") or {}).get("tier") or "DESCONOCIDO").upper()
@@ -1820,7 +1878,9 @@ def aplicar_delay_humanizado(accion: str, dom_data: Optional[dict] = None, tiemp
         target_mean += random.uniform(1.5, 2.5)
 
     duracion_objetivo = random.gauss(target_mean, sigma)
-    duracion_objetivo = max(2.2, min(8.5, duracion_objetivo))
+    min_cfg = float(getattr(config, "HUMAN_MIN_DELAY_SEC", 1.5))
+    max_cfg = float(getattr(config, "HUMAN_MAX_DELAY_SEC", 8.5))
+    duracion_objetivo = max(min_cfg, min(max_cfg, duracion_objetivo))
 
     pausa_adicional = duracion_objetivo - max(0.0, tiempo_ia_seg)
     pausa_final = max(0.65, pausa_adicional)
@@ -1974,7 +2034,15 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None, tiempo_ia
                     inp = target.locator(raise_input_sel).first
                     if inp.is_visible():
                         print(f"💰 Ajustando importe de subida a: {monto}")
-                        inp.fill(str(monto), timeout=300)
+                        aplicar_pausa_pre_clic(inp, "Input Apuesta")
+                        inp.click(timeout=800)
+                        if not os.environ.get("PYTEST_CURRENT_TEST"):
+                            time.sleep(random.uniform(0.10, 0.22))
+                            inp.fill("")
+                            inp.press_sequentially(str(monto), delay=random.randint(50, 110))
+                            time.sleep(random.uniform(0.15, 0.30))
+                        else:
+                            inp.fill(str(monto), timeout=300)
                 except Exception:
                     pass
 

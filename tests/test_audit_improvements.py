@@ -247,6 +247,34 @@ def test_human_timing_delay_calculation():
             os.environ["PYTEST_CURRENT_TEST"] = orig
 
 
+def test_human_pre_click_pause_and_config():
+    import os
+    import unittest.mock as mock
+    from bot import aplicar_pausa_pre_clic
+    import config
+
+    assert config.HUMAN_TIMING_ENABLED is True
+    assert config.HUMAN_MIN_DELAY_SEC == 1.5
+    assert config.HUMAN_PRE_CLICK_PAUSE_MS == 220
+    assert config.HUMAN_CLICK_DURATION_MS == 85
+
+    # Con PYTEST_CURRENT_TEST retorna 0.0 inmediatamente
+    assert aplicar_pausa_pre_clic() == 0.0
+
+    # Sin PYTEST_CURRENT_TEST calcula pausa pre-clic neuromuscular entre 80ms y 450ms
+    orig = os.environ.pop("PYTEST_CURRENT_TEST", None)
+    try:
+        with mock.patch("time.sleep") as mock_sleep:
+            mock_elem = mock.MagicMock()
+            d = aplicar_pausa_pre_clic(mock_elem, "Boton Call")
+            assert 0.08 <= d <= 0.45
+            mock_elem.hover.assert_called_once()
+            mock_sleep.assert_called_once()
+    finally:
+        if orig is not None:
+            os.environ["PYTEST_CURRENT_TEST"] = orig
+
+
 def test_6max_position_resolution_all_positions():
     tracker = GameTracker()
 
