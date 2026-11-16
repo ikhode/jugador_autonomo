@@ -2482,21 +2482,21 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
                 confianza=0.98,
             )
 
-    # 1. Manos fuertes por valor (Top Pair / Overpair / Set+ / Premium Preflop)
+    # 1. Manos fuertes por valor (Top Pair / Overpair / Set+ / Premium Preflop) -> Apuesta/Subida por valor garantizada
     if es_mano_fuerte:
-        if hay_bet:
+        if hay_bet or (not es_preflop and hay_check):
             return PokerDecision(
-                evaluacion=f"⚡ [0ms GTO] Mano fuerte ({desc_mano}). Subiendo por valor.",
+                evaluacion=f"⚡ [0ms GTO] Mano fuerte ({desc_mano}). Apostando / Subiendo por valor.",
                 estrategia_competitiva="Extraer valor máximo con mano fuerte",
                 estado_pantalla="EN_MESA_JUEGO",
                 es_mi_turno=True,
                 accion="RAISE",
                 monto_apuesta=monto_saneado,
-                confianza=0.95
+                confianza=0.96
             )
         elif hay_call:
             return PokerDecision(
-                evaluacion=f"⚡ [0ms GTO] Mano fuerte ({desc_mano}). Pagando call rival.",
+                evaluacion=f"⚡ [0ms GTO] Mano fuerte ({desc_mano}). Pagando subida rival.",
                 estrategia_competitiva="Igualar apuesta con mano ganadora",
                 estado_pantalla="EN_MESA_JUEGO",
                 es_mi_turno=True,
@@ -2512,21 +2512,21 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
                 es_mi_turno=True,
                 accion="CHECK",
                 monto_apuesta=0,
-                confianza=0.92
+                confianza=0.90
             )
 
-    # 2. Combo draws / proyectos fuertes semi-farol o call por pot odds
+    # 2. Combo draws / proyectos fuertes (8+ outs): Semi-farol agresivo por valor/equidad
     if not es_preflop and tiene_proyecto and outs_totales >= 8:
         equidad_aprox_pct = min(65.0, outs_totales * (4.0 if len(comunitarias_str.split()) == 3 else 2.0))
-        if gto_comb.get('es_combo_draw') and hay_bet and not textura_peligrosa:
+        if gto_comb.get('es_combo_draw') and (hay_bet or hay_check) and not textura_peligrosa:
             return PokerDecision(
-                evaluacion=f"⚡ [0ms GTO] Combo Draw ({outs_totales} outs). Semi-farol agresivo.",
+                evaluacion=f"⚡ [0ms GTO] Combo Draw ({outs_totales} outs). Semi-farol agresivo por valor.",
                 estrategia_competitiva="Presión con alta equidad de proyecto",
                 estado_pantalla="EN_MESA_JUEGO",
                 es_mi_turno=True,
                 accion="RAISE",
                 monto_apuesta=int(gto_math.get('sizing_cbet_estandar') or monto_saneado),
-                confianza=0.86,
+                confianza=0.88,
             )
         if hay_call and equidad_aprox_pct >= pot_odds_pct:
             return PokerDecision(
@@ -2537,6 +2537,21 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
                 accion="CALL",
                 monto_apuesta=0,
                 confianza=0.85,
+            )
+
+    # 3. Manos de Valor Fuerte Postflop (Top Pair / Set / Two Pair): Inferencia EV para Value Bet
+    if not es_preflop and (gto_comb.get('es_top_pair') or es_set_o_mejor or es_top_o_overpair):
+        ev_res = decidir_por_ev(dom_data)
+        ev_acc = ev_res.get('accion')
+        if ev_acc == 'RAISE' and (hay_bet or hay_check) and float(ev_res.get('ev_bb', 0)) > 0.3:
+            return PokerDecision(
+                evaluacion=f"⚡ [0ms EV] Valor postflop con {desc_mano} (EV: {ev_res.get('ev_bb', 0):+.2f} BB). Apostando por valor.",
+                estrategia_competitiva="Extracción de valor postflop por EV positivo",
+                estado_pantalla="EN_MESA_JUEGO",
+                es_mi_turno=True,
+                accion="RAISE",
+                monto_apuesta=monto_saneado,
+                confianza=0.90
             )
 
     # 3. Pase gratis (Check prioritario)
