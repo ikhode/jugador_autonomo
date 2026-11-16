@@ -1352,40 +1352,40 @@ def navegar_al_juego(page):
         except Exception:
             pass
 
-        twister_encontrado = False
-        intentos_twister = 0
+        cash_game_encontrado = False
+        intentos_cash = 0
 
-        while intentos_twister < 10 and not twister_encontrado:
+        while intentos_cash < 10 and not cash_game_encontrado:
             if es_mesa_activa_o_turno(page):
-                print("⚡ ¡Turno activo de juego detectado! Cancelando espera de Twister e ingresando a la mesa...")
+                print("⚡ ¡Turno activo de juego detectado! Cancelando espera de Cash Game e ingresando a la mesa...")
                 return page
 
-            intentos_twister += 1
-            if intentar_click(page, config.SELECTORS["select_game_card"], "Categoría Twister (.classic-twister)", timeout=1500):
-                twister_encontrado = True
+            intentos_cash += 1
+            if intentar_click(page, config.SELECTORS["select_game_card"], "Categoría Cash Game (.game-category-tile.cash-game)", timeout=1500):
+                cash_game_encontrado = True
                 break
 
             for frame in page.frames:
                 try:
-                    if intentar_click(frame, config.SELECTORS["select_game_card"], "Categoría Twister (iFrame)", timeout=0):
-                        twister_encontrado = True
+                    if intentar_click(frame, config.SELECTORS["select_game_card"], "Categoría Cash Game (iFrame)", timeout=0):
+                        cash_game_encontrado = True
                         break
                 except Exception:
                     pass
 
-            if not twister_encontrado:
+            if not cash_game_encontrado:
                 page.wait_for_timeout(500)
 
         if es_mesa_activa_o_turno(page):
             return page
 
-        if twister_encontrado:
-            print("✅ Categoría Twister seleccionada con éxito.")
+        if cash_game_encontrado:
+            print("✅ Categoría Cash Game (Texas Hold'em) seleccionada con éxito.")
             esperar_carga_dom(page)
         else:
-            print("⚠️ Twister no encontrado tras reintentos. Verificando si el botón de juego está visible directamente...")
+            print("⚠️ Cash Game no encontrado tras reintentos. Verificando si el botón de juego está visible directamente...")
             if intentar_click(page, config.SELECTORS["start_match_btn"], "Botón Jugar Poker (Directo)", timeout=3000):
-                print("✨ ¡Botón Jugar Poker encontrado directamente sin pasar por Twister!")
+                print("✨ ¡Botón Jugar Poker encontrado directamente sin pasar por Cash Game!")
                 esperar_carga_dom(page)
                 return page
 
@@ -1614,8 +1614,8 @@ def salir_de_mesa_vacia_o_finalizada(target_mesa, page, context) -> bool:
 
         time.sleep(1.2)
 
-        # Verificar si apareció la tarjeta Twister o el botón Jugar Poker tras pulsar '+'
-        if intentar_click(target_mesa, config.SELECTORS["select_game_card"], "Categoría Twister (tras salir de mesa)", timeout=1200):
+        # Verificar si apareció la tarjeta Cash Game o el botón Jugar Poker tras pulsar '+'
+        if intentar_click(target_mesa, config.SELECTORS["select_game_card"], "Categoría Cash Game (tras salir de mesa)", timeout=1200):
             time.sleep(0.6)
         if intentar_click(target_mesa, config.SELECTORS["start_match_btn"], "Botón Jugar Poker (tras salir de mesa)", timeout=1500):
             return True
@@ -1723,7 +1723,7 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
 
         elif accion == "START_GAME":
             print("🎮 Lobby detectado -> Clic en Tarjeta de Juego e Iniciar Partida")
-            intentar_click(target, config.SELECTORS["select_game_card"], "Tarjeta de Juego Twister", timeout=2000)
+            intentar_click(target, config.SELECTORS["select_game_card"], "Tarjeta de Juego Cash Game", timeout=2000)
             esperar_carga_dom(target)
             if not intentar_click(target, config.SELECTORS["start_match_btn"], "Botón Iniciar Partida", timeout=2000):
                 clicar_texto_modal_universal(target, ["Jugar Poker", "Jugar"], "Botón Jugar Poker")
@@ -1878,6 +1878,7 @@ def decidir_accion_local(dom_data: dict) -> PokerDecision:
             confianza=0.0
         )
 
+    t0_ns = time.perf_counter_ns()
     game_state_mgr, decision_maker = get_local_decision_maker()
 
     pot = _parse_num_dom(dom_data.get('bote'), 0.0)
@@ -1897,7 +1898,9 @@ def decidir_accion_local(dom_data: dict) -> PokerDecision:
     historical_actions = game_state_mgr.get_historical_actions()
     opponent_profile = game_state_mgr.get_opponent_profile()
 
-    local_action = decision_maker.make_decision(game_state, historical_actions, opponent_profile)
+    decision_res = decision_maker.decidir_accion_hibrida(game_state, historical_actions, opponent_profile)
+    local_action = decision_res["final_action"]
+    latency_ms = round((time.perf_counter_ns() - t0_ns) / 1_000_000.0, 3)
 
     base_gto_decision = decidir_accion_rapida(dom_data)
 
@@ -1909,10 +1912,34 @@ def decidir_accion_local(dom_data: dict) -> PokerDecision:
     elif "raise" in local_action:
         action_upper = "RAISE" if "RAISE" in str(dom_data.get('botones_visibles', '')).upper() or base_gto_decision.accion == "RAISE" else ("CALL" if current_bet > 0 else "CHECK")
 
-    base_gto_decision.evaluacion = f"⚡ [Local Hybrid AI] Sugerencia: {local_action} -> Ejecutada: {action_upper}"
+    base_gto_decision.evaluacion = f"⚡ [Local Hybrid AI] Sugerencia: {local_action} -> Ejecutada: {action_upper} ({latency_ms}ms)"
     base_gto_decision.estrategia_competitiva = "Modelo local híbrido (CFR Base + Random Forest Opponent Modeling)"
     base_gto_decision.accion = action_upper
     base_gto_decision.confianza = 0.95
+
+    # Registrar evento en tiempo real en SQLite a través de analytics_logger
+    try:
+        analytics_logger.registrar_evento_tiempo_real({
+            "event_type": "LOCAL_AGENT_DECISION",
+            "street": str(dom_data.get("calle") or dom_data.get("street") or "PREFLOP"),
+            "pot_size": pot,
+            "current_bet": current_bet,
+            "hero_cards": dom_data.get("mis_cartas", ""),
+            "board_cards": comunitarias_str,
+            "player_predictions": decision_res.get("opponent_prediction", {}),
+            "gto_probs": decision_res.get("base_probabilities", {}),
+            "exploitative_probs": decision_res.get("adjusted_probabilities", {}),
+            "chosen_action": action_upper,
+            "action_amount": base_gto_decision.monto_apuesta,
+            "latency_ms": latency_ms,
+            "extra_data": {
+                "sugerencia_raw": local_action,
+                "evaluacion": base_gto_decision.evaluacion
+            }
+        })
+    except Exception as e:
+        print(f"⚠️ Warning logging local decision to SQLite: {e}")
+
     return base_gto_decision
 
 def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
@@ -2365,6 +2392,22 @@ def main():
                                         data_json = json.loads(json_str)
 
                                         class_id = data_json.get("classId")
+
+                                        try:
+                                            analytics_logger.registrar_evento_tiempo_real({
+                                                "event_type": f"WS_CLASS_{class_id}" if class_id else "WS_DECODE",
+                                                "street": tracker.current_street,
+                                                "pot_size": float(data_json.get("totalPot", 0.0) or 0.0),
+                                                "current_bet": 0.0,
+                                                "hero_cards": " ".join(tracker.hero_cards),
+                                                "board_cards": " ".join(tracker.community_cards),
+                                                "extra_data": {
+                                                    "classId": class_id,
+                                                    "payload_summary": {k: data_json[k] for k in ("classId", "seatIndex", "actionCode", "actionAmount", "roundNo", "totalPot") if k in data_json}
+                                                }
+                                            })
+                                        except Exception:
+                                            pass
 
                                         # Decodificar classId 10017 (Turn Notification & Legal Actions)
                                         if class_id == 10017:

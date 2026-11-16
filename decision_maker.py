@@ -8,6 +8,10 @@ class DecisionMaker:
         self.opponent_model = opponent_model
 
     def make_decision(self, game_state, historical_actions, opponent_profile):
+        result = self.decidir_accion_hibrida(game_state, historical_actions, opponent_profile)
+        return result["final_action"]
+
+    def decidir_accion_hibrida(self, game_state, historical_actions, opponent_profile):
         # 1. Get base probabilities from the GTO strategic engine
         base_probabilities = self.strategic_engine.get_action_probabilities(game_state)
         print(f"Base probabilities from strategic engine: {base_probabilities}")
@@ -25,7 +29,13 @@ class DecisionMaker:
         # 4. Select a final action based on adjusted probabilities
         final_action = self._select_action(adjusted_probabilities)
         print(f"Final action decided: {final_action}")
-        return final_action
+
+        return {
+            "final_action": final_action,
+            "base_probabilities": base_probabilities,
+            "opponent_prediction": opponent_prediction,
+            "adjusted_probabilities": adjusted_probabilities
+        }
 
     def _adjust_probabilities(self, base_probabilities, predicted_opponent_action, opponent_action_probabilities, game_state):
         adjusted_probs = base_probabilities.copy()

@@ -86,8 +86,8 @@ class LiveTableMonitor:
     def __init__(
         self,
         profiler: OpponentProfiler,
-        modalidad: str = "Twister 3-Max",
-        max_asientos: int = 3,
+        modalidad: str = "Cash Game Texas Hold'em",
+        max_asientos: int = 6,
         hero_nickname: str = "",
         big_blind: float = 20.0,
         persist_live_file: bool = True,

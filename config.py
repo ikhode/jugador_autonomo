@@ -62,8 +62,8 @@ SLOW_MO = int(os.getenv("SLOW_MO", "100"))
 USER_DATA_DIR = Path("browser_profile")
 
 # Configuración de Modalidad y Mesa para Live HUD Multijugador
-POKER_MODE = os.getenv("POKER_MODE", "Twister 3-Max")
-MAX_TABLE_SEATS = int(os.getenv("MAX_TABLE_SEATS", "3"))
+POKER_MODE = os.getenv("POKER_MODE", "Cash Game Texas Hold'em")
+MAX_TABLE_SEATS = int(os.getenv("MAX_TABLE_SEATS", "6"))
 HERO_NICKNAME = os.getenv("HERO_NICKNAME", GAME_USER)
 
 # Configuración del Sistema de Analíticas y Versionado Experimental
@@ -91,7 +91,7 @@ SELECTORS = {
     "login_submit": "button.iniciar, button[type='submit'], button.submit-login",
     "poker_nav_link": "a[href*='poker'], button:has-text('Poker')",
     "btn_open_poker": "#pokerPageOpen, button:has-text('Abrir Poker'), .open-poker-btn",
-    "select_game_card": "xpath=//*[@id=\"Poker\"]/div/div[1]/div[2]/div[1]/div[1]/div/div[1]/div/div[3]/div[2]/div[2], .classic-twister, .twister-game-card, .game-card, [data-game*='twister']",
+    "select_game_card": ".game-category-tile.cash-game, .cash-game, xpath=//*[@id=\"Poker\"]/div/div[1]/div[2]/div[1]/div[1]/div/div[1]/div/div[3]/div[2]/div[2], .classic-twister, .twister-game-card, .game-card, [data-game*='cash'], [data-game*='twister']",
     "start_match_btn": ".filter-play-button, button:has-text('Jugar Poker'), button:has-text('Jugar'), button:has-text('Play'), .play-btn",
 
     # Mesa de juego (nombres estándar y alias con prefijo btn_)

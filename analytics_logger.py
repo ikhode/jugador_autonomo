@@ -253,6 +253,16 @@ class PokerAnalyticsLogger:
         except Exception:
             pass
 
+    def registrar_evento_tiempo_real(self, event_data: Dict[str, Any]) -> None:
+        """Encola la escritura asíncrona de un evento en tiempo real en SQLite."""
+        data = dict(event_data or {})
+        if "session_id" not in data or not data["session_id"]:
+            data["session_id"] = self.session_id
+        if "hand_uid" not in data or not data["hand_uid"]:
+            with self._lock:
+                data["hand_uid"] = self.active_hand.get("hand_uid", "")
+        self._dispatch(self.storage.registrar_evento_tiempo_real, data)
+
     def registrar_decision(
         self,
         dom_data: Dict[str, Any],

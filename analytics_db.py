@@ -352,6 +352,29 @@ def inicializar_esquema_analiticas(db_path: Path = DB_PATH) -> None:
             )
         """)
 
+        # 9. Tabla de eventos en tiempo real, predicciones de oponentes y decisiones del agente local
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS realtime_game_events (
+                event_uid TEXT PRIMARY KEY,
+                hand_uid TEXT DEFAULT '',
+                session_id TEXT DEFAULT '',
+                timestamp TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                street TEXT DEFAULT 'PREFLOP',
+                pot_size REAL DEFAULT 0.0,
+                current_bet REAL DEFAULT 0.0,
+                hero_cards TEXT DEFAULT '',
+                board_cards TEXT DEFAULT '',
+                player_predictions_json TEXT DEFAULT '{}',
+                gto_probs_json TEXT DEFAULT '{}',
+                exploitative_probs_json TEXT DEFAULT '{}',
+                chosen_action TEXT DEFAULT '',
+                action_amount REAL DEFAULT 0.0,
+                latency_ms REAL DEFAULT 0.0,
+                extra_data_json TEXT DEFAULT '{}'
+            )
+        """)
+
         # Asegurar etiquetado retroactivo de sesiones/manos/decisiones de benchmark como is_synthetic = 1
         conn.execute("UPDATE analytics_sessions SET is_synthetic = 1 WHERE mode = 'benchmark' OR session_id LIKE 'bench_%';")
         conn.execute("UPDATE analytics_hands SET is_synthetic = 1 WHERE session_id LIKE 'bench_%' OR scenario_id LIKE 'SCEN_%';")
@@ -373,6 +396,8 @@ def inicializar_esquema_analiticas(db_path: Path = DB_PATH) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_decisions_pos ON analytics_decisions(position);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_decisions_opp ON analytics_decisions(opponent_profile);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON system_telemetry(timestamp);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_realtime_events_type ON realtime_game_events(event_type);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_realtime_events_ts ON realtime_game_events(timestamp);")
         conn.commit()
 
 
@@ -1072,6 +1097,69 @@ class AnalyticsStorage:
                 "SELECT * FROM system_telemetry ORDER BY timestamp DESC LIMIT ?",
                 (int(limit),),
             ).fetchall()
+            return [dict(r) for r in rows]
+
+    def registrar_evento_tiempo_real(self, event_data: Dict[str, Any]) -> str:
+        """
+        Registra un evento en tiempo real, predicción de oponentes o decisión del agente local en SQLite.
+        """
+        event_uid = str(event_data.get("event_uid") or f"evt_{uuid.uuid4().hex[:16]}")
+        hand_uid = str(event_data.get("hand_uid") or "")
+        session_id = str(event_data.get("session_id") or "")
+        ts = str(event_data.get("timestamp") or datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3])
+        event_type = str(event_data.get("event_type") or "GAME_EVENT")
+        street = str(event_data.get("street") or "PREFLOP")
+        pot_size = float(event_data.get("pot_size") or 0.0)
+        current_bet = float(event_data.get("current_bet") or 0.0)
+        hero_cards = str(event_data.get("hero_cards") or "")
+        board_cards = str(event_data.get("board_cards") or "")
+
+        preds = event_data.get("player_predictions") or event_data.get("player_predictions_json") or {}
+        gto_p = event_data.get("gto_probs") or event_data.get("gto_probs_json") or {}
+        exp_p = event_data.get("exploitative_probs") or event_data.get("exploitative_probs_json") or {}
+        extra_d = event_data.get("extra_data") or event_data.get("extra_data_json") or {}
+
+        preds_json = json.dumps(preds, ensure_ascii=False) if isinstance(preds, (dict, list)) else str(preds)
+        gto_json = json.dumps(gto_p, ensure_ascii=False) if isinstance(gto_p, (dict, list)) else str(gto_p)
+        exp_json = json.dumps(exp_p, ensure_ascii=False) if isinstance(exp_p, (dict, list)) else str(exp_p)
+        extra_json = json.dumps(extra_d, ensure_ascii=False) if isinstance(extra_d, (dict, list)) else str(extra_d)
+
+        chosen_action = str(event_data.get("chosen_action") or "")
+        action_amount = float(event_data.get("action_amount") or 0.0)
+        latency_ms = float(event_data.get("latency_ms") or 0.0)
+
+        with get_connection(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO realtime_game_events (
+                    event_uid, hand_uid, session_id, timestamp, event_type,
+                    street, pot_size, current_bet, hero_cards, board_cards,
+                    player_predictions_json, gto_probs_json, exploitative_probs_json,
+                    chosen_action, action_amount, latency_ms, extra_data_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_uid, hand_uid, session_id, ts, event_type,
+                    street, pot_size, current_bet, hero_cards, board_cards,
+                    preds_json, gto_json, exp_json,
+                    chosen_action, action_amount, latency_ms, extra_json
+                )
+            )
+            conn.commit()
+        return event_uid
+
+    def obtener_eventos_tiempo_real(self, limit: int = 100, event_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        with get_connection(self.db_path) as conn:
+            if event_type:
+                rows = conn.execute(
+                    "SELECT * FROM realtime_game_events WHERE event_type = ? ORDER BY timestamp DESC LIMIT ?",
+                    (event_type, limit)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM realtime_game_events ORDER BY timestamp DESC LIMIT ?",
+                    (int(limit),)
+                ).fetchall()
             return [dict(r) for r in rows]
 
     def verificar_integridad_db(self) -> Dict[str, Any]:
