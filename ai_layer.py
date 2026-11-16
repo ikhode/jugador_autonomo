@@ -537,7 +537,7 @@ class AILayer:
             "response_schema": PokerDecision,
             "temperature": 0.1,
         }
-        if hasattr(types, "ThinkingConfig"):
+        if hasattr(types, "ThinkingConfig") and "3.5" not in str(model_name):
             gen_config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
 
         # Timeout acotado por llamada respetando el presupuesto total (hasta 11.5s)

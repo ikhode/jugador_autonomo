@@ -12,14 +12,13 @@ GAME_USER = os.getenv("GAME_USER", "")
 GAME_PASSWORD = os.getenv("GAME_PASSWORD", "")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 GEMINI_MODELS_PRIORITY = list(dict.fromkeys([
     GEMINI_MODEL,
+    "gemini-3.5-flash-lite",
+    "gemini-3.8-flash",
     "gemini-3.1-flash-lite",
-    "cf-llama-3.1-8b",
-    "cf-deepseek-r1",
     "gemini-3.5-flash",
-    "gemini-2.5-flash",
 ]))
 ACTIVE_MODEL = os.getenv("ACTIVE_MODEL", GEMINI_MODEL)
 AVAILABLE_MODELS = list(dict.fromkeys([*GEMINI_MODELS_PRIORITY, "gemma-4b-local", "gto-heuristic"]))

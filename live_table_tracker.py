@@ -67,11 +67,27 @@ def normalizar_estado_jugador(raw_status: Optional[str]) -> str:
 
 
 def _parse_num(val: Any) -> float:
+    if val is None:
+        return 0.0
     if isinstance(val, (int, float)):
         return float(val)
-    s = "".join(ch for ch in str(val or "") if ch.isdigit() or ch == ".")
+    s = str(val).strip()
+    if not s:
+        return 0.0
+    # Si viene en formato lista o tupla separada por coma y espacio ("500, 40" o "15, 30"), tomar el primer elemento
+    if ", " in s:
+        s = s.split(", ")[0].strip()
+    # Si tiene coma como separador de miles (ej. "1,500")
+    if re.search(r"\d+,\d{3}", s):
+        s = s.replace(",", "")
+    else:
+        # Si tiene coma decimal (ej. "12,50")
+        s = s.replace(",", ".")
+    m = re.search(r"-?\d+(?:\.\d+)?", s)
+    if not m:
+        return 0.0
     try:
-        return float(s) if s else 0.0
+        return float(m.group(0))
     except Exception:
         return 0.0
 
@@ -419,7 +435,7 @@ class LiveTableMonitor:
                 activos = list(self.players.values())
             if not activos:
                 return "", ""
-            activos.sort(key=lambda p: (bool(p.get("is_turn")), float(p.get("bet", 0.0)), float(p.get("stack", 0.0))), reverse=True)
+            activos.sort(key=lambda p: (bool(p.get("is_turn")), _parse_num(p.get("bet", 0.0)), _parse_num(p.get("stack", 0.0))), reverse=True)
             top = activos[0]
             return str(top.get("player_id") or ""), str(top.get("nickname") or "")
 
@@ -469,12 +485,12 @@ class LiveTableMonitor:
                     seat=p.get("seat"),
                     status=p.get("status"),
                 )
-                opp_stack = float(p.get("stack") or 0.0)
+                opp_stack = _parse_num(p.get("stack") or 0.0)
                 eff_stack = min(self.hero_stack, opp_stack) if (self.hero_stack > 0 and opp_stack > 0) else (opp_stack or self.hero_stack)
                 eff_bb = round(eff_stack / self.big_blind, 1) if eff_stack > 0 else None
 
                 perfil["stack"] = opp_stack
-                perfil["bet"] = float(p.get("bet") or 0.0)
+                perfil["bet"] = _parse_num(p.get("bet") or 0.0)
                 perfil["is_turn"] = bool(p.get("is_turn"))
                 perfil["en_mano"] = p.get("status") == "ACTIVE"
                 perfil["recomendacion_tactica"] = generar_analisis_explotativo_contextual(

@@ -310,6 +310,13 @@ class GameTracker:
 
     def reset_mano(self):
         self.finalizar_mano_actual("Reinicio de mano / Modal")
+        self.position_name = "DESCONOCIDA"
+        self.is_dealer = False
+        self.my_cards.clear()
+        self.community_cards.clear()
+        self.current_street = "PREFLOP"
+        self.current_round_no = 1
+        self.current_hand_history.clear()
 
     def obtener_contexto_completo(self) -> str:
         past_str = "\n".join(self.past_hands_summary) if self.past_hands_summary else "Primera mano del torneo."
@@ -649,8 +656,19 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             modales.push('MesaFinalizadaVacia');
         }
 
-        const esDealerHero = !!document.querySelector('.my-player .dealer-button, .my-player .dealer-chip, .my-player .dealer-badge, .my-player.dealer, .my-player [class*="dealer"]');
-        const posDom = esDealerHero ? 'BTN' : '';
+        let posDom = '';
+        const esDealerHero = !!document.querySelector('.my-player .dealer-button, .my-player .dealer-chip, .my-player .dealer-badge, .my-player.dealer, .my-player [class*="dealer"], .seat-hero [class*="dealer"]');
+        if (esDealerHero) {
+            posDom = 'BTN';
+        } else {
+            const ciegaHero = parseFloat((apuestasRivales['hero'] || '0').replace(/[^\d.]/g, '')) || 0;
+            const bbNum = parseFloat(bigBlindDom.replace(/[^\d.]/g, '')) || 20;
+            if (ciegaHero > 0 && ciegaHero <= 0.6 * bbNum) {
+                posDom = 'SB';
+            } else if (ciegaHero >= 0.8 * bbNum) {
+                posDom = 'BB';
+            }
+        }
 
         return {
             mis_cartas: misCartas.join(' '),
@@ -758,8 +776,16 @@ def _parse_num_dom(valor: Any, default: float = 0.0) -> float:
         return default
     if isinstance(valor, (int, float)):
         return float(valor)
-    # Extraer el primer número válido en lugar de concatenar dígitos de listas ("40 | 20" -> 40, no 4020)
-    m = re.search(r"-?\d+(?:\.\d+)?", str(valor).replace(",", ""))
+    s = str(valor).strip()
+    if not s:
+        return default
+    if ", " in s:
+        s = s.split(", ")[0].strip()
+    if re.search(r"\d+,\d{3}", s):
+        s = s.replace(",", "")
+    else:
+        s = s.replace(",", ".")
+    m = re.search(r"-?\d+(?:\.\d+)?", s)
     if not m:
         return default
     try:
@@ -1145,6 +1171,8 @@ def actualizar_dom_data_conservando_contexto(
     if not posicion or posicion == "DESCONOCIDA":
         if getattr(tracker_obj, "is_dealer", False) or dom_data.get("posicion") == "BTN":
             posicion = "BTN"
+        elif dom_data.get("posicion") in ("SB", "BB"):
+            posicion = dom_data.get("posicion")
         else:
             bb = _parse_num_dom(dom_data.get("big_blind"), float(getattr(config, "BIG_BLIND_DEFAULT", 20.0))) or 20.0
             a_ig = _parse_num_dom(dom_data.get("a_igualar"), 0.0)
@@ -1152,9 +1180,13 @@ def actualizar_dom_data_conservando_contexto(
             opciones_str = str(dom_data.get("opciones_disponibles", "")).upper()
             if not comunitarias and "CHECK" in opciones_str and a_ig == 0.0:
                 posicion = "BB"
-            elif not comunitarias and abs(a_ig - 0.5 * bb) < 0.2 * bb:
+            elif not comunitarias and (abs(a_ig - 0.5 * bb) < 0.2 * bb or abs(a_ig - 1.5 * bb) < 0.2 * bb):
                 posicion = "SB"
-            elif not comunitarias and bote_f <= 1.5 * bb and abs(a_ig - bb) < 0.2 * bb:
+            elif not comunitarias and bote_f <= 1.6 * bb and abs(a_ig - bb) < 0.2 * bb:
+                posicion = "BTN"
+            elif not comunitarias and abs(a_ig - bb) < 0.2 * bb and bote_f >= 2.0 * bb:
+                posicion = "BB"
+            elif getattr(tracker_obj, "is_dealer", False):
                 posicion = "BTN"
             else:
                 posicion = "BTN"
@@ -1745,21 +1777,27 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
             if intentar_click(target, btn_check, "Botón Check", timeout=1500):
                 accion_ejecutada = "CHECK"
             else:
-                respaldo = decidir_accion_rapida(dom_data or {})
-                if respaldo.accion in ("RAISE", "CALL"):
-                    print("⚠️ Check no disponible (hubo apuesta), pero mano es fuerte/jugable -> Realizando Call...")
-                    if intentar_click(target, btn_call, "Botón Call (Fallback Mano Fuerte)", timeout=1500):
-                        accion_ejecutada = "CALL"
-                    else:
-                        intentar_click(target, btn_fold, "Botón Fold (Fallback)", timeout=1500)
-                        accion_ejecutada = "FOLD"
+                a_igualar_val = _parse_num_dom((dom_data or {}).get("a_igualar"), 0.0)
+                # Si no había apuesta rival (a_igualar == 0) o estamos en River, el botón Check desapareció
+                # porque la mano/ronda concluyó (Showdown o bote entregado). NUNCA foldear aquí
+                # para evitar foldear la siguiente mano preflop.
+                if a_igualar_val <= 0 or (dom_data or {}).get("street") == "RIVER":
+                    print("ℹ️ Check ya no disponible en mesa (ronda concluida o showdown). Manteniendo Check sin pulsar Fold.")
+                    accion_ejecutada = "CHECK"
                 else:
-                    print("🛡️ Check no disponible (hubo apuesta rival) y mano débil -> Realizando Fold seguro...")
-                    if intentar_click(target, btn_fold, "Botón Fold (Protección Stack)", timeout=1500):
-                        accion_ejecutada = "FOLD"
+                    respaldo = decidir_accion_rapida(dom_data or {})
+                    if respaldo.accion in ("RAISE", "CALL"):
+                        print("⚠️ Check no disponible (hubo apuesta rival), pero mano es fuerte/jugable -> Realizando Call...")
+                        if intentar_click(target, btn_call, "Botón Call (Fallback Mano Fuerte)", timeout=1500):
+                            accion_ejecutada = "CALL"
+                        else:
+                            accion_ejecutada = "CHECK"
                     else:
-                        intentar_click(target, btn_call, "Botón Call (Último recurso)", timeout=1500)
-                        accion_ejecutada = "CALL"
+                        print("🛡️ Check no disponible (hubo apuesta rival previa) y mano débil -> Realizando Fold seguro...")
+                        if intentar_click(target, btn_fold, "Botón Fold (Protección Stack)", timeout=1500):
+                            accion_ejecutada = "FOLD"
+                        else:
+                            accion_ejecutada = "CHECK"
 
         elif accion == "CALL":
             if intentar_click(target, btn_call, "Botón Call", timeout=2000):
@@ -1839,8 +1877,8 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None) -> str:
         print(f"🏆 Partida o mesa finalizada/cerrada ({e}).")
 
     if accion_ejecutada in ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN"):
-        if not verificar_accion_reflejada(target, accion_ejecutada, timeout_ms=700):
-            print(f"⚠️ [POST-CLIC] La acción {accion_ejecutada} no desapareció del DOM tras 700ms.")
+        if not verificar_accion_reflejada(target, accion_ejecutada, timeout_ms=1200):
+            print(f"⚠️ [POST-CLIC] La acción {accion_ejecutada} no desapareció del DOM tras 1200ms.")
 
     return accion_ejecutada
 
@@ -1989,6 +2027,8 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
     monto_dom = int(re.sub(r"[^\d]", "", str(raw_monto)) or 0)
     bote_num = float(gto_math.get('bote') or _parse_num_dom(dom_data.get('bote'), 0.0) or 0.0)
     sizing_gto = int(gto_math.get('sizing_cbet_estandar') or round(max(bb * 2.0, bote_num * 0.55)))
+    if not es_preflop and (gto_comb.get('es_doble_pareja') or gto_comb.get('es_set') or gto_comb.get('es_trips')):
+        sizing_gto = int(round(max(bb * 2.0, bote_num * 0.67)))
     if not es_preflop and monto_dom <= int(bb) and bote_num >= bb * 3.0:
         monto_saneado = sizing_gto
     else:
@@ -2142,6 +2182,29 @@ def decidir_accion_rapida(dom_data: dict) -> PokerDecision:
     )
 
     desc_mano = (gto_comb.get('categoria') if not es_preflop and gto_comb.get('categoria') != 'CARTA ALTA PRIVADA' else None) or fuerza or gto_pre.get('mano_code') or cartas
+
+    # Preflop: Tier S (QQ+, AKs) ante raise rival con stack efectivo <= 25 BB -> ALL_IN / 4-BET por valor
+    if es_preflop and tier == 'S' and a_igualar_bb > 1.5:
+        if hay_allin:
+            return PokerDecision(
+                evaluacion=f"⚡ [0ms GTO] Mano monstruo preflop ({desc_mano}). Push All-in por valor absoluto.",
+                estrategia_competitiva="4-Bet / Push con premium hand en 3-max",
+                estado_pantalla="EN_MESA_JUEGO",
+                es_mi_turno=True,
+                accion="ALL_IN",
+                monto_apuesta=0,
+                confianza=0.98,
+            )
+        if hay_bet:
+            return PokerDecision(
+                evaluacion=f"⚡ [0ms GTO] Mano monstruo preflop ({desc_mano}). Subida máxima por valor.",
+                estrategia_competitiva="4-Bet con premium hand en 3-max",
+                estado_pantalla="EN_MESA_JUEGO",
+                es_mi_turno=True,
+                accion="RAISE",
+                monto_apuesta=int(gto_math.get('mi_stack') or round(stack_efectivo_bb * bb)),
+                confianza=0.98,
+            )
 
     # 1. Manos fuertes por valor (Top Pair / Overpair / Set+ / Premium Preflop)
     if es_mano_fuerte:
@@ -2431,6 +2494,13 @@ def main():
                                                 is_fold = (act_code == 0)
                                                 status = "FOLD" if is_fold else "ACTIVO"
                                                 table_tracker.actualizar_jugador(player_id=f"Seat_{seat_idx}", seat=seat_idx, bet=act_amt, stack=chips_left, status=status)
+                                                if getattr(table_tracker, "hero_seat", None) == seat_idx:
+                                                    if act_code == 1:
+                                                        tracker.position_name = "SB"
+                                                        tracker.is_dealer = False
+                                                    elif act_code == 2:
+                                                        tracker.position_name = "BB"
+                                                        tracker.is_dealer = False
 
                                         if "nickname" in data_json:
                                             tracker.opp_nick = data_json["nickname"]
@@ -2849,11 +2919,11 @@ def main():
                             tracker.last_action_taken = accion_ejecutada
                             tracker.last_street = tracker.current_street
                             tracker.last_position = tracker.position_name
-                            tracker.last_big_blind = float((dom_data.get("gto_math") or {}).get("big_blind") or getattr(config, "BIG_BLIND_DEFAULT", 20.0))
+                            tracker.last_big_blind = _parse_num_dom((dom_data.get("gto_math") or {}).get("big_blind"), float(getattr(config, "BIG_BLIND_DEFAULT", 20.0)))
                             if accion_ejecutada == "CALL":
-                                tracker.last_invested_chips += float((dom_data.get("gto_math") or {}).get("a_igualar") or 0.0)
+                                tracker.last_invested_chips += _parse_num_dom((dom_data.get("gto_math") or {}).get("a_igualar"), 0.0)
                             elif accion_ejecutada in ("RAISE", "ALL_IN"):
-                                tracker.last_invested_chips += float(getattr(decision, "monto_apuesta", 0) or (dom_data.get("gto_math") or {}).get("a_igualar") or 0.0)
+                                tracker.last_invested_chips += _parse_num_dom(getattr(decision, "monto_apuesta", 0) or (dom_data.get("gto_math") or {}).get("a_igualar"), 0.0)
                             if analytics_logger is not None:
                                 try:
                                     analytics_logger.registrar_decision(
