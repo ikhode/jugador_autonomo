@@ -457,9 +457,9 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
             <div class="filter-group">
                 <label>Origen de Datos (Resultado en Vivo vs Benchmark Sintético)</label>
                 <select id="fDataSource" onchange="applyDashboardFilters()">
-                    <option value="ALL">Todos (Resultado en Vivo + Benchmark Sintético)</option>
-                    <option value="LIVE">Resultado en Vivo (is_synthetic=0)</option>
-                    <option value="BENCHMARK">Benchmark Sintético (is_synthetic=1)</option>
+                    <option value="LIVE" selected>Partidas Reales en Vivo (is_synthetic=0)</option>
+                    <option value="ALL">Todas las Fuentes (En Vivo + Laboratorio)</option>
+                    <option value="BENCHMARK">Laboratorio Sintético (is_synthetic=1)</option>
                 </select>
             </div>
             <div class="filter-group">
@@ -1018,6 +1018,7 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
         }}
 
         function initFilters() {{
+            document.getElementById('fDataSource').value = 'LIVE';
             const vSelect = document.getElementById('fVersion');
             const sSelect = document.getElementById('fSession');
             const versions = RAW_DATA.versions_history || [];
@@ -1057,7 +1058,7 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
         }}
 
         function resetDashboardFilters() {{
-            document.getElementById('fDataSource').value = 'ALL';
+            document.getElementById('fDataSource').value = 'LIVE';
             document.getElementById('fVersion').value = 'ALL';
             document.getElementById('fSession').value = 'ALL';
             document.getElementById('fPosition').value = 'ALL';
@@ -1603,7 +1604,7 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
             }});
 
             // 4. Version Comparison Chart
-            const verRows = (RAW_DATA.version_comparison && RAW_DATA.version_comparison.versions) || [];
+            const verRows = ((RAW_DATA.version_comparison && RAW_DATA.version_comparison.versions) || []).filter(v => v.hands_evaluated > 0);
             destroyChart('chartVersions');
             chartInstances['chartVersions'] = new Chart(document.getElementById('chartVersions'), {{
                 type: 'bar',
@@ -2473,7 +2474,7 @@ def generar_dashboard_html(
     db_path: Path = DB_PATH,
     output_html: Path = DEFAULT_DASHBOARD_PATH,
     output_path: Optional[Path] = None,
-    auto_seed_benchmark_if_empty: bool = True,
+    auto_seed_benchmark_if_empty: bool = False,
 ) -> Dict[str, Any]:
     """
     Recopila todas las métricas, ejecuta las 6 exportaciones CSV/JSON trazables
@@ -2482,9 +2483,6 @@ def generar_dashboard_html(
     if output_path is not None:
         output_html = Path(output_path)
     storage = AnalyticsStorage(db_path=db_path)
-    if auto_seed_benchmark_if_empty and len(storage.consultar_manos({"data_source": "benchmark"})) == 0:
-        ejecutar_benchmark_versiones(storage=storage, num_scenarios=120)
-
     engine = PokerAnalyticsEngine(storage=storage)
     analytics = engine.calcular_analiticas_completas()
     analytics["all_hands"] = storage.consultar_manos()
@@ -2526,9 +2524,6 @@ def generar_dashboard_html(
 def imprimir_resumen_consola(db_path: Path = DB_PATH) -> None:
     """Imprime en terminal un informe estructurado de las 9 secciones del sistema de analíticas."""
     storage = AnalyticsStorage(db_path=db_path)
-    if len(storage.consultar_manos({"data_source": "benchmark"})) == 0:
-        ejecutar_benchmark_versiones(storage=storage, num_scenarios=120)
-
     engine = PokerAnalyticsEngine(storage=storage)
     data = engine.calcular_analiticas_completas()
     gp = data["general_performance"]
