@@ -501,7 +501,7 @@ class LiveTableMonitor:
                 print(f"#{str(self.hero_seat or 'H'):<7} | {str(self.hero_nickname or 'Hero'):<16} | {float(self.hero_stack):<9.2f} | {'-':<9} | {'HERO':<10} | {'GTO / Híbrido':<16} | {'-':<22}")
 
             pred_dict = (decision_res or {}).get("opponent_prediction", {})
-            bluff_p = (decision_res or {}).get("bluff_probability", pred_dict.get("bluff_probability", 0.0))
+            global_bluff_p = float((decision_res or {}).get("bluff_probability", pred_dict.get("bluff_probability", 0.0)))
 
             for k, p in sorted(self.players.items(), key=lambda x: int(x[1].get("seat") or 99)):
                 seat = p.get("seat", "?")
@@ -512,16 +512,33 @@ class LiveTableMonitor:
                 pid = p.get("player_id", "")
 
                 estilo = "Desconocido"
+                perfil = {}
                 try:
-                    perfil = self.profiler.obtener_perfil_explotativo(pid, nick)
+                    perfil = self.profiler.obtener_perfil_explotativo(pid, nick, seat=seat, status=status)
                     estilo = perfil.get("estilo", "Desconocido")
                 except Exception:
                     pass
 
-                bluff_str = f"Bluff: {bluff_p*100:.1f}%"
-                if pred_dict and p.get("is_turn"):
-                    pred_act = pred_dict.get("predicted_action", "N/A")
-                    bluff_str = f"Pred: {pred_act} (Bluff: {bluff_p*100:.0f}%)"
+                # Calcular bluff probability individual única para cada oponente basada en sus stats de perfil
+                try:
+                    vpip_o = float(perfil.get("vpip_pct", 25.0)) / 100.0
+                    pfr_o = float(perfil.get("pfr_pct", 15.0)) / 100.0
+                    agresividad_o = float(perfil.get("agresividad", 1.0))
+                    manos_o = int(perfil.get("manos", 0) or 0)
+                    if manos_o > 0:
+                        indiv_bluff = round(min(0.85, max(0.01, (pfr_o / max(0.01, vpip_o)) * 0.20 * min(3.0, agresividad_o))), 2)
+                    else:
+                        indiv_bluff = 0.05
+                except Exception:
+                    indiv_bluff = 0.05
+
+                bluff_str = f"Bluff: {indiv_bluff*100:.1f}%"
+                if p.get("is_turn"):
+                    if decision_res and pred_dict:
+                        pred_act = pred_dict.get("predicted_action", "N/A")
+                        bluff_str = f"Pred: {pred_act} (Bluff: {global_bluff_p*100:.0f}%)"
+                    else:
+                        bluff_str = f"Bluff: {indiv_bluff*100:.1f}%"
 
                 turn_indicator = " 👈 [TURNO]" if p.get("is_turn") else ""
                 print(f"#{str(seat):<7} | {str(nick)[:16]:<16} | {float(stack):<9.2f} | {float(bet):<9.2f} | {str(status):<10} | {str(estilo):<16} | {str(bluff_str):<22}{turn_indicator}")
