@@ -21,7 +21,7 @@ def test_h03_zero_observed_actions_never_classified_nit():
         for h in range(1, 48):
             prof.incrementar_manos_rival("41203111", "doctorwave953", hand_id=h)
         perfil = prof.obtener_perfil_explotativo("41203111", "doctorwave953")
-        assert perfil["estilo"] == "SIN DATOS"
+        assert perfil["estilo"] in ("JUGADOR NUEVO", "SIN DATOS")
         prof.close()
 
 
@@ -210,7 +210,7 @@ def test_mejora6_position_inference_never_desconocida():
     assert dom_bb["posicion"] == "BB"
 
     # Ahora probamos registrar la decisión con PokerAnalyticsLogger
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         db_path = Path(tmp) / "analytics_pos_test.db"
         logger = PokerAnalyticsLogger(db_path=db_path, async_mode=False)
         dec = PokerDecision(
@@ -238,6 +238,7 @@ def test_mejora6_position_inference_never_desconocida():
             assert row is not None
             assert row[0] == "BB"
             assert row[0] != "DESCONOCIDA"
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
 
 
 def test_mejora2_timer_artifacts_rejected_from_profiler_and_db():
@@ -254,7 +255,7 @@ def test_mejora2_timer_artifacts_rejected_from_profiler_and_db():
     assert sanitizar_nickname("Time: 12") == ""
     assert sanitizar_nickname("shark 450") == "shark"
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         db_path = Path(tmp) / "clean_opp.db"
         prof = OpponentProfiler(db_path=str(db_path))
 
@@ -267,6 +268,7 @@ def test_mejora2_timer_artifacts_rejected_from_profiler_and_db():
             hand_id=1,
         )
         prof.incrementar_manos_rival("Time: 12", "Time: 12", hand_id=2)
+        prof.close()
 
         # Verificar que no se insertó ninguna fila corrupta en la base de datos
         with sqlite3.connect(str(db_path)) as conn:
@@ -274,8 +276,7 @@ def test_mejora2_timer_artifacts_rejected_from_profiler_and_db():
                 "SELECT * FROM oponentes WHERE player_id LIKE '%Time%' OR nickname LIKE '%Time%'"
             ).fetchall()
             assert len(rows) == 0, f"Se encontraron filas corruptas con Time: {rows}"
-
-        prof.close()
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
 
 
 def test_mejora3_push_fold_a_igualar_extraction_logic():

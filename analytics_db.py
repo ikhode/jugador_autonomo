@@ -4,6 +4,7 @@ Reutiliza la base de datos SQLite existente (`logs/poker_stats.db`) en modo WAL,
 manteniendo compatibilidad total con `opponents_profiler.py` y separando estrictamente
 datos reales (`is_synthetic=0`, `mode='live'`) de experimentos controlados (`is_synthetic=1`, `mode='benchmark'`).
 """
+import atexit
 import csv
 import hashlib
 import io
@@ -15,10 +16,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 from db_models import Base
 
 DB_PATH = Path("logs/poker_stats.db")
-analytics_engine = create_engine(f"sqlite:///{DB_PATH}")
+analytics_engine = create_engine(f"sqlite:///{DB_PATH}", poolclass=NullPool)
+atexit.register(analytics_engine.dispose)
 
 PROJECT_CORE_FILES = [
     "config.py",
@@ -403,6 +406,7 @@ def inicializar_esquema_analiticas(db_path: Path = DB_PATH) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_realtime_events_type ON realtime_game_events(event_type);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_realtime_events_ts ON realtime_game_events(timestamp);")
         conn.commit()
+    analytics_engine.dispose()
 
 
 def generar_uid_determinista(*partes: Any) -> str:
@@ -817,7 +821,7 @@ class AnalyticsStorage:
                     str(hand_data.get("opponent_nick") or ""),
                     str(hand_data.get("opponent_profile") or "DESCONOCIDO"),
                     str(hand_data.get("result_reason") or ""),
-                ),
+                )
             )
 
             conn.execute(
@@ -831,6 +835,78 @@ class AnalyticsStorage:
             conn.commit()
 
         return hand_uid
+
+    def guardar_manos_bulk(self, hands_list: List[Dict[str, Any]]) -> None:
+        """Inserta o actualiza un lote masivo de manos en una sola transacción SQLite."""
+        if not hands_list:
+            return
+
+        rows = []
+        for h in hands_list:
+            session_id = str(h.get("session_id") or "default_session")
+            version_id = str(h.get("version_id") or "1.0")
+            hand_number = int(h.get("hand_number") or 1)
+            scenario_id = str(h.get("scenario_id") or "")
+            hand_uid = h.get("hand_uid") or generar_uid_determinista(session_id, version_id, hand_number, scenario_id)
+            is_synth = int(bool(h.get("is_synthetic", session_id.startswith("bench_") or bool(scenario_id))))
+            c_hash = str(h.get("code_hash") or self.default_code_hash)
+            started_at = str(h.get("started_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            ended_at = str(h.get("ended_at") or started_at)
+            date_str = ended_at[:10]
+            big_blind = max(1.0, float(h.get("big_blind") or 20.0))
+            net_chips = float(h.get("net_profit_chips") or 0.0)
+            net_bb = float(h.get("net_profit_bb") if "net_profit_bb" in h else (net_chips / big_blind))
+            ev_chips = float(h.get("ev_net_chips") if "ev_net_chips" in h else net_chips)
+            ev_bb = float(h.get("ev_net_bb") if "ev_net_bb" in h else (ev_chips / big_blind))
+            allin_ev_chips = float(h.get("allin_ev_chips") if "allin_ev_chips" in h else ev_chips)
+            allin_ev_bb = float(h.get("allin_ev_bb") if "allin_ev_bb" in h else (allin_ev_chips / big_blind))
+
+            row = (
+                hand_uid, session_id, version_id, hand_number, scenario_id,
+                is_synth, c_hash, started_at, ended_at, date_str,
+                str(h.get("position") or ""), str(h.get("hole_cards") or ""), str(h.get("preflop_tier") or ""), int(h.get("preflop_score") or 0),
+                str(h.get("board_flop") or ""), str(h.get("board_turn") or ""), str(h.get("board_river") or ""), str(h.get("final_board") or ""),
+                str(h.get("reached_street") or ""), int(h.get("saw_flop") or 0), int(h.get("went_to_showdown") or 0), int(h.get("won_at_showdown") or 0),
+                int(h.get("won_hand") or 0), int(h.get("vpip_flag") or 0), int(h.get("pfr_flag") or 0), int(h.get("three_bet_opp") or 0), int(h.get("three_bet_flag") or 0),
+                int(h.get("faced_three_bet") or 0), int(h.get("fold_to_three_bet") or 0), int(h.get("cbet_flop_opp") or 0), int(h.get("cbet_flop_flag") or 0),
+                int(h.get("faced_cbet_flop") or 0), int(h.get("fold_to_cbet_flop") or 0), float(h.get("hero_stack_start") or 0.0), float(h.get("hero_stack_end") or 0.0),
+                float(h.get("effective_stack") or 0.0), big_blind, float(h.get("pot_final") or 0.0), float(h.get("invested_chips") or 0.0), float(h.get("won_chips") or 0.0),
+                net_chips, net_bb, ev_chips, ev_bb,
+                allin_ev_chips, allin_ev_bb, int(h.get("is_allin") or 0),
+                float(h.get("bankroll_after") or 0.0), float(h.get("ev_bankroll_after") or 0.0), str(h.get("opponent_id") or ""), str(h.get("opponent_nick") or ""),
+                str(h.get("opponent_profile") or ""), str(h.get("result_reason") or "")
+            )
+            rows.append(row)
+
+        query = """
+            INSERT INTO analytics_hands (
+                hand_uid, session_id, version_id, hand_number, scenario_id,
+                is_synthetic, code_hash, started_at, ended_at, date_str,
+                position, hole_cards, preflop_tier, preflop_score,
+                board_flop, board_turn, board_river, final_board,
+                reached_street, saw_flop, went_to_showdown, won_at_showdown,
+                won_hand, vpip_flag, pfr_flag, three_bet_opp, three_bet_flag,
+                faced_three_bet, fold_to_three_bet, cbet_flop_opp, cbet_flop_flag,
+                faced_cbet_flop, fold_to_cbet_flop, hero_stack_start, hero_stack_end,
+                effective_stack, big_blind, pot_final, invested_chips, won_chips,
+                net_profit_chips, net_profit_bb, ev_net_chips, ev_net_bb,
+                allin_ev_chips, allin_ev_bb, is_allin,
+                bankroll_after, ev_bankroll_after, opponent_id, opponent_nick,
+                opponent_profile, result_reason
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            ON CONFLICT(hand_uid) DO UPDATE SET
+                final_board = excluded.final_board,
+                won_hand = excluded.won_hand,
+                net_profit_chips = excluded.net_profit_chips,
+                net_profit_bb = excluded.net_profit_bb
+        """
+        with get_connection(self.db_path) as conn:
+            conn.executemany(query, rows)
+            conn.commit()
 
     def guardar_decision(self, decision_data: Dict[str, Any]) -> str:
         """

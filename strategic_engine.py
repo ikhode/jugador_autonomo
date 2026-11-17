@@ -33,16 +33,28 @@ except Exception:
 class StrategicEngine:
     def __init__(self, strategy_model=None):
         self.strategy_model = strategy_model
-        if DEEP_MODEL_AVAILABLE:
+        self._tf_policy_net = None
+        self._deep_cfr_solver = None
+
+    @property
+    def tf_policy_net(self):
+        if self._tf_policy_net is None:
             try:
-                self.tf_policy_net = PokerValuePolicyNetwork()
-                self.deep_cfr_solver = DeepCFRSolver()
+                from deep_poker_model import PokerValuePolicyNetwork
+                self._tf_policy_net = PokerValuePolicyNetwork()
             except Exception:
-                self.tf_policy_net = None
-                self.deep_cfr_solver = None
-        else:
-            self.tf_policy_net = None
-            self.deep_cfr_solver = None
+                pass
+        return self._tf_policy_net
+
+    @property
+    def deep_cfr_solver(self):
+        if self._deep_cfr_solver is None:
+            try:
+                from deep_poker_model import DeepCFRSolver
+                self._deep_cfr_solver = DeepCFRSolver()
+            except Exception:
+                pass
+        return self._deep_cfr_solver
 
     def get_action_probabilities(self, game_state, model_mode: str = "gto") -> dict:
         """
@@ -105,11 +117,15 @@ class StrategicEngine:
                     return {"fold": 0.0, "call": 0.0, "raise_small": 0.70, "raise_medium": 0.25, "raise_large": 0.05}
             elif tier == "B":
                 if current_bet > 1.5:
+                    if posicion == "SB":
+                        return {"fold": 0.45, "call": 0.10, "raise_small": 0.35, "raise_medium": 0.10, "raise_large": 0.0}
                     return {"fold": 0.25, "call": 0.35, "raise_small": 0.30, "raise_medium": 0.10, "raise_large": 0.0}
                 else:
                     return {"fold": 0.0, "call": 0.05, "raise_small": 0.75, "raise_medium": 0.20, "raise_large": 0.0}
             elif tier == "C":
                 if current_bet > 1.5:
+                    if posicion == "SB":
+                        return {"fold": 0.88, "call": 0.02, "raise_small": 0.10, "raise_medium": 0.0, "raise_large": 0.0}
                     return {"fold": 0.75, "call": 0.15, "raise_small": 0.10, "raise_medium": 0.0, "raise_large": 0.0}
                 else:
                     return {"fold": 0.40, "call": 0.05, "raise_small": 0.45, "raise_medium": 0.10, "raise_large": 0.0}
@@ -148,6 +164,8 @@ class StrategicEngine:
                 return {"fold": 0.0, "call": 0.50, "raise_small": 0.35, "raise_medium": 0.15, "raise_large": 0.0}
         elif hand_equity >= 0.25:
             if current_bet > 0:
+                if pot_size > 0 and current_bet >= pot_size * 0.8 and not es_top_pair and not es_monstruo:
+                    return {"fold": 0.95, "call": 0.05, "raise_small": 0.0, "raise_medium": 0.0, "raise_large": 0.0}
                 return {"fold": 0.65, "call": 0.25, "raise_small": 0.08, "raise_medium": 0.02, "raise_large": 0.0}
             else:
                 return {"fold": 0.0, "call": 0.75, "raise_small": 0.20, "raise_medium": 0.05, "raise_large": 0.0}
@@ -156,6 +174,32 @@ class StrategicEngine:
                 return {"fold": 0.90, "call": 0.05, "raise_small": 0.03, "raise_medium": 0.02, "raise_large": 0.0}
             else:
                 return {"fold": 0.0, "call": 0.85, "raise_small": 0.10, "raise_medium": 0.05, "raise_large": 0.0}
+
+    def subgame_solve(self, game_state, depth_limit: int = 1) -> dict:
+        """
+        Emula Subgame Solving (Depth-Limited Search estilo Pluribus):
+        Evalúa el EV esperado por acción utilizando los valores predichos por la red neuronal
+        de política/valor (Deep CFR / TF Policy) como función de valor en hojas terminales.
+        """
+        base_probs = self.get_action_probabilities(game_state)
+        if self.tf_policy_net is not None:
+            try:
+                _, val_ev = self.tf_policy_net.predict_policy_and_value(game_state)
+                ev_factor = max(-1.0, min(1.0, val_ev / 10.0))
+                if ev_factor > 0.2:
+                    if "raise_small" in base_probs: base_probs["raise_small"] += 0.05 * ev_factor
+                    if "raise_medium" in base_probs: base_probs["raise_medium"] += 0.03 * ev_factor
+                elif ev_factor < -0.2:
+                    if "fold" in base_probs: base_probs["fold"] += 0.05 * abs(ev_factor)
+                    if "call" in base_probs: base_probs["call"] = max(0.0, base_probs["call"] - 0.05 * abs(ev_factor))
+
+                tot = sum(base_probs.values())
+                if tot > 0:
+                    for k in base_probs:
+                        base_probs[k] /= tot
+            except Exception:
+                pass
+        return base_probs
 
     def train(self, training_data):
         pass

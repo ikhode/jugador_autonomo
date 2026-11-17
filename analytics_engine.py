@@ -15,6 +15,7 @@ Principios de rigor técnico (Fases 1, 2, 3, 5 y 6):
 import json
 import math
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import config
@@ -1536,10 +1537,11 @@ class PokerAnalyticsEngine:
             },
             "exploitability_analysis": {
                 "full_game_nash_exploitability_status": "NO_DISPONIBLE_SIN_SOLVER_CFR",
+                "deep_cfr_status": "DEEP_CFR_KERA_ACTIVO" if (Path(__file__).resolve().parent / "models" / "deep_cfr_advantage.keras").exists() else "NO_DISPONIBLE_SIN_SOLVER_CFR",
                 "full_game_note": (
                     "El cálculo exacto de Exploitability de Nash (mbb/g en árbol completo) requiere resolver estrategias "
                     "mediante Counterfactual Regret Minimization (CFR+) sobre todo el árbol de juego. Se reporta únicamente "
-                    "la cota verificable en el subjuego Push/Fold (≤ 10 BB)."
+                    "la cota verificable en el subjuego Push/Fold (≤ 10 BB) y la aproximación Deep CFR Solver."
                 ),
                 "push_fold_subgame_sample": push_fold_decisions,
                 "push_fold_nash_compliance_pct": (

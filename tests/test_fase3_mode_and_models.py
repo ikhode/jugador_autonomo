@@ -28,8 +28,8 @@ class TestFase3ModeAndModels(unittest.TestCase):
             self.assertEqual(config.obtener_modo_activo(), "determinista")
             config.MODO = "hibrido"
             self.assertEqual(config.obtener_modo_activo(), "hibrido")
-            config.MODO = "gemini"
-            self.assertEqual(config.obtener_modo_activo(), "gemini")
+            config.MODO = "local"
+            self.assertEqual(config.obtener_modo_activo(), "local")
             config.ACTIVE_MODEL = "gto-heuristic"
             self.assertEqual(config.obtener_modo_activo(), "determinista")
         finally:

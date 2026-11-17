@@ -19,8 +19,11 @@ logger = logging.getLogger(__name__)
 def optimizar_imagen(image_bytes: bytes) -> tuple[bytes, str]:
     """
     Comprime la captura de pantalla a JPEG conservando legibilidad de números pequeños y cartas
-    (sin reducir por debajo de 1920x1080 y con subsampling=0). Registra cualquier error.
+    (sin reducir por debajo de 1920x1080 y con subsampling=0). Registra cualquier error en logger.
     """
+    if not image_bytes or len(image_bytes) < 8:
+        return image_bytes or b"", "image/png"
+
     try:
         from PIL import Image
         img = Image.open(io.BytesIO(image_bytes))
@@ -32,7 +35,6 @@ def optimizar_imagen(image_bytes: bytes) -> tuple[bytes, str]:
         return buf.getvalue(), "image/jpeg"
     except Exception as e:
         logger.warning("⚠️ [optimizar_imagen] Error procesando captura (%s): %s", type(e).__name__, e)
-        print(f"⚠️ [optimizar_imagen] Error procesando captura ({type(e).__name__}): {e}")
         return image_bytes, "image/png"
 
 

@@ -41,7 +41,7 @@ GEMMA_LOCAL_MODEL_PATH = os.getenv("GEMMA_LOCAL_MODEL_PATH", "")
 CF_ACCOUNT_ID = os.getenv("CF_ACCOUNT_ID", "ac96116c5db82e232d04042b84c09399")
 CF_API_TOKEN = os.getenv("CF_API_TOKEN", "cfoat_Q_VSvNcUMZDjl6ZFHIteMvjmDR0azL4gGFL_SwLFHcE.XL25iEiUQyUGJg4hnZzz2N-O2QOcBwnGSPQ__Vhovzk")
 
-MODO = os.getenv("MODO", "gemini").strip().lower()  # "determinista" | "hibrido" | "gemini" | "local" | "tensorflow"
+MODO = os.getenv("MODO", "local").strip().lower()  # "determinista" | "hibrido" | "gemini" | "local" | "tensorflow"
 HYBRID_EV_DIFF_THRESHOLD_BB = float(os.getenv("HYBRID_EV_DIFF_THRESHOLD_BB", "0.5"))
 
 # Analítica honesta (Fase 5)
@@ -68,7 +68,7 @@ def obtener_modo_activo() -> str:
         return "local"
     if m in ("tensorflow", "tf", "keras", "deep_learning"):
         return "tensorflow"
-    return "gemini"
+    return "local"
 USAR_CAPTURA = os.getenv("USAR_CAPTURA", "false").lower() == "true"
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 HOLD_BROWSER_OPEN = os.getenv("HOLD_BROWSER_OPEN", "true").lower() == "true"

@@ -34,6 +34,7 @@ class DecisionMaker:
             opponent_action_probabilities,
             bluff_prob,
             game_state,
+            opponent_profile=opponent_profile,
         )
 
         # 4. Seleccionar la acción final basándose en la distribución calibrada
@@ -47,8 +48,9 @@ class DecisionMaker:
             "adjusted_probabilities": adjusted_probabilities
         }
 
-    def _adjust_probabilities(self, base_probabilities, predicted_opponent_action, opponent_action_probabilities, bluff_prob, game_state):
+    def _adjust_probabilities(self, base_probabilities, predicted_opponent_action, opponent_action_probabilities, bluff_prob, game_state, opponent_profile=None):
         adjusted_probs = base_probabilities.copy()
+        opp_prof = opponent_profile if isinstance(opponent_profile, dict) else (game_state.get("perfil_rival", {}) or {})
 
         # Filtrar claves no de acción como 'predicted_ev_bb'
         eval_keys = [k for k in list(adjusted_probs.keys()) if k not in ("fold", "call", "raise_small", "raise_medium", "raise_large")]
@@ -56,10 +58,91 @@ class DecisionMaker:
             adjusted_probs.pop(ek, None)
 
         current_bet = float(game_state.get("current_bet", 0.0))
+        comunitarias_str = str(game_state.get("cartas_comunitarias", "") or "").strip()
+        mis_cartas_str = str(game_state.get("mis_cartas", "") or "").strip()
+        board_cards_count = len(comunitarias_str.split()) if comunitarias_str else 0
+        posicion = str(game_state.get("posicion") or opp_prof.get("posicion") or "BTN").upper()
 
         # Regla 1: Nunca foldear si la opción de Check es gratis (current_bet == 0)
         if current_bet == 0:
             adjusted_probs["fold"] = 0.0
+
+        # =============================================================
+        # PRO UPGRADE 1: Sizing Dinámico por Textura de Board (Dry vs Wet)
+        # =============================================================
+        if board_cards_count in (3, 4, 5):
+            try:
+                from poker_gto_engine import analizar_textura_mesa_y_blockers
+                textura_info = analizar_textura_mesa_y_blockers(mis_cartas_str, comunitarias_str)
+                t_str = str(textura_info.get("textura_mesa", "")).upper()
+                if "SECA" in t_str:
+                    # Tablero seco: Sizing pequeño eficiente para valor y c-bets económicas
+                    if "raise_small" in adjusted_probs: adjusted_probs["raise_small"] += 0.08
+                elif "CONECTADA" in t_str or "PELIGROSA" in t_str:
+                    # Tablero húmedo/coordinado: Sizing grande para protección contra draws
+                    if "raise_large" in adjusted_probs: adjusted_probs["raise_large"] += 0.10
+            except Exception:
+                pass
+
+        # =============================================================
+        # PRO UPGRADE 2: Conciencia Avanzada de Bloqueadores en River
+        # =============================================================
+        if board_cards_count == 5:
+            try:
+                from poker_gto_engine import analizar_blockers_y_nut_effect
+                nut_blockers = analizar_blockers_y_nut_effect(mis_cartas_str, comunitarias_str)
+                blocker_score = float(nut_blockers.get("blocker_nut_score", 0.0))
+                if current_bet > 0:
+                    if blocker_score >= 0.4 or nut_blockers.get("tiene_key_blocker", False):
+                        # Con blockers fuertes, aumentamos call (bluff-catch) o raise
+                        if "call" in adjusted_probs: adjusted_probs["call"] += 0.15
+                    elif blocker_score == 0.0:
+                        # Sin blockers en river frente a apuesta, suprimimos faroles y favorecemos fold o showvalue
+                        if "raise_small" in adjusted_probs: adjusted_probs["raise_small"] = max(0.0, adjusted_probs["raise_small"] - 0.10)
+                        if "raise_medium" in adjusted_probs: adjusted_probs["raise_medium"] = 0.0
+                        if "fold" in adjusted_probs: adjusted_probs["fold"] += 0.08
+                else:
+                    if blocker_score >= 0.4:
+                        if "raise_medium" in adjusted_probs: adjusted_probs["raise_medium"] += 0.10
+            except Exception:
+                pass
+
+        # =============================================================
+        # PRO UPGRADE 3: Calibración Agresiva y Posicional (BTN / CO vs SB / BB)
+        # =============================================================
+        if posicion in ("BTN", "CO"):
+            # En posición de iniciativa, amplificar agresión/robo
+            if "raise_small" in adjusted_probs: adjusted_probs["raise_small"] += 0.10
+            if "raise_medium" in adjusted_probs: adjusted_probs["raise_medium"] += 0.05
+        elif posicion in ("SB", "BB") and current_bet > 0:
+            # Fuera de posición en ciegas, endurecer defensa contra raises
+            if "fold" in adjusted_probs: adjusted_probs["fold"] += 0.08
+            if "call" in adjusted_probs: adjusted_probs["call"] = max(0.0, adjusted_probs["call"] - 0.05)
+
+        # =============================================================
+        # PRO UPGRADE 4: Memoria Episódica RAG de Oponentes / Arquetipos
+        # =============================================================
+        try:
+            from poker_experience_memory import PokerExperienceMemory
+            rag_mem = PokerExperienceMemory()
+            opp_archetype = str(opp_prof.get("estilo", "Reg"))
+            board_tex_key = "SECA" if board_cards_count > 0 else "PREFLOP"
+            lessons = rag_mem.buscar_errores_similares(
+                hand_tier="B",
+                board_texture=board_tex_key,
+                opp_archetype=opp_archetype,
+                calle="RIVER" if board_cards_count == 5 else ("FLOP" if board_cards_count == 3 else "PREFLOP"),
+                posicion=posicion,
+                limit=1
+            )
+            if lessons:
+                # Si la memoria RAG registra errores pasados en este spot, ajustamos hacia una línea más conservadora / sólida
+                if "fold" in adjusted_probs: adjusted_probs["fold"] += 0.05
+                if "call" in adjusted_probs: adjusted_probs["call"] += 0.05
+                if "raise_large" in adjusted_probs: adjusted_probs["raise_large"] = max(0.0, adjusted_probs["raise_large"] - 0.05)
+            rag_mem.close()
+        except Exception:
+            pass
 
         # Regla 2: Farol explotativo - si el oponente foldea con frecuencia (>0.60 prob), aumentar subidas
         if predicted_opponent_action == "fold" and opponent_action_probabilities.get("fold", 0) > 0.60:
@@ -67,7 +150,7 @@ class DecisionMaker:
             if "raise_medium" in adjusted_probs: adjusted_probs["raise_medium"] += 0.05
             if "call" in adjusted_probs: adjusted_probs["call"] = max(0.0, adjusted_probs["call"] - 0.10)
 
-        # Regla 3: Value bet explotativo - si el oponente paga con frecuencia (>0.55 prob), favorecer apuetas/subidas de valor
+        # Regla 3: Value bet explotativo - si el oponente paga con frecuencia (>0.55 prob), favorecer apuestas/subidas de valor
         elif predicted_opponent_action == "call" and opponent_action_probabilities.get("call", 0) > 0.55:
             if adjusted_probs.get("call", 0) > 0.3 or adjusted_probs.get("raise_small", 0) > 0.2:
                 if "raise_small" in adjusted_probs: adjusted_probs["raise_small"] += 0.05
@@ -77,6 +160,48 @@ class DecisionMaker:
         if current_bet > 0 and bluff_prob > 0.60:
             if "call" in adjusted_probs: adjusted_probs["call"] += 0.12
             if "fold" in adjusted_probs: adjusted_probs["fold"] = max(0.0, adjusted_probs["fold"] - 0.12)
+
+        # -------------------------------------------------------------
+        # REGLAS AVANZADAS EXPLOTATIVAS PARA JUGADORES REGULARES (REG LEAKS)
+        # -------------------------------------------------------------
+        manos_obs = int(opp_prof.get("manos", 0) or 0)
+        if manos_obs >= 15:
+            fold_to_3bet = float(opp_prof.get("fold_to_3bet_pct", 0.0))
+            cbet_flop = float(opp_prof.get("cbet_flop_pct", opp_prof.get("cbet_pct", 0.0)))
+            fold_to_cr = float(opp_prof.get("fold_to_check_raise_pct", 0.0))
+            river_fold_barrel = float(opp_prof.get("river_fold_to_barrel_pct", 0.0))
+
+            # Explotación Preflop: 3-Bet Light contra regulares que foldean >60% a 3-bets
+            if board_cards_count == 0 and fold_to_3bet >= 60.0:
+                if "raise_small" in adjusted_probs: adjusted_probs["raise_small"] += 0.12
+                if "raise_medium" in adjusted_probs: adjusted_probs["raise_medium"] += 0.08
+
+            # Explotación Flop: Check-Raise bluff contra regulares que abusan de C-Bet (>70%) y foldean a Check-Raise (>50%)
+            if board_cards_count == 3 and cbet_flop >= 70.0 and (fold_to_cr >= 50.0 or fold_to_cr == 0.0):
+                if current_bet > 0 and "raise_small" in adjusted_probs:
+                    adjusted_probs["raise_small"] += 0.15
+
+            # Explotación River: Triple Barrel Bluff cuando foldean de más en River (>55%)
+            if board_cards_count == 5 and river_fold_barrel >= 55.0:
+                try:
+                    from poker_gto_engine import analizar_blockers_y_nut_effect
+                    nut_blockers = analizar_blockers_y_nut_effect(mis_cartas_str, comunitarias_str)
+                    if nut_blockers.get("tiene_key_blocker", False):
+                        if "raise_medium" in adjusted_probs: adjusted_probs["raise_medium"] += 0.12
+                        if "raise_large" in adjusted_probs: adjusted_probs["raise_large"] += 0.08
+                except Exception:
+                    pass
+
+        # Regla 5: Explotación de Calling Station (Evitar faroles / C-Bets inútiles contra rivales pasivos que nunca foldean)
+        estilo_rival = str(opp_prof.get("estilo", "") or "").upper()
+        if "CALLING STATION" in estilo_rival or "ESTACION" in estilo_rival:
+            if current_bet == 0:
+                if "raise_small" in adjusted_probs: adjusted_probs["raise_small"] = max(0.0, adjusted_probs["raise_small"] * 0.3)
+                if "raise_medium" in adjusted_probs: adjusted_probs["raise_medium"] = max(0.0, adjusted_probs["raise_medium"] * 0.2)
+            else:
+                if "raise_small" in adjusted_probs: adjusted_probs["raise_small"] = max(0.0, adjusted_probs["raise_small"] * 0.1)
+                if "raise_medium" in adjusted_probs: adjusted_probs["raise_medium"] = 0.0
+                if "call" in adjusted_probs: adjusted_probs["call"] += 0.15
 
         # Normalizar probabilidades para que sumen 1.0
         total_prob = sum(adjusted_probs.values())

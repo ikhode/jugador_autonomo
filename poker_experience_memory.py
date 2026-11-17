@@ -9,6 +9,7 @@ Características de producción:
    de pérdidas por pura varianza en jugadas `+EV` / `OPTIMA`.
 5. Recuperación rankeada por severidad, decaimiento temporal y coincidencia de calle/posición.
 """
+import atexit
 from contextlib import closing
 from datetime import datetime, timezone
 import math
@@ -18,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from db_models import Base, ErrorExperiencia
 
@@ -68,14 +70,19 @@ def _ensure_schema_migrations(target_engine) -> None:
 engine = create_engine(
     f"sqlite:///{DB_MEMORY_PATH}",
     connect_args={"check_same_thread": False, "timeout": 30.0},
+    poolclass=NullPool,
 )
+atexit.register(engine.dispose)
 _configure_sqlite_memory(engine)
-SessionLocal = sessionmaker(bind=engine)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
-def inicializar_db_memoria():
+def inicializar_db_memoria(target_engine=None):
+    eng = target_engine or engine
     DB_MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _ensure_schema_migrations(engine)
+    _ensure_schema_migrations(eng)
+    if ":memory:" not in str(getattr(eng, "url", "")):
+        eng.dispose()
 
 
 inicializar_db_memoria()
@@ -139,10 +146,11 @@ class PokerExperienceMemory:
             self._engine = create_engine(
                 f"sqlite:///{db_path}",
                 connect_args={"check_same_thread": False, "timeout": 30.0},
+                poolclass=NullPool,
             )
             _configure_sqlite_memory(self._engine)
             _ensure_schema_migrations(self._engine)
-            self._session_factory = sessionmaker(bind=self._engine)
+            self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         else:
             inicializar_db_memoria()
             self._engine = engine
@@ -151,6 +159,8 @@ class PokerExperienceMemory:
     def close(self):
         if hasattr(self, "_engine") and self._engine:
             try:
+                from sqlalchemy.orm import close_all_sessions
+                close_all_sessions()
                 self._engine.dispose()
             except Exception:
                 pass

@@ -114,15 +114,21 @@ def formatear_carta_canonica(carta_raw: str) -> str:
 
 
 def formatear_cartas_canonicas(cartas: Any) -> str:
-    """Convierte listas o cadenas de cartas (ej. ['SJ', 'H6'], 'H5 D2 H9') a formato canónico 'J♠ 6♥', '5♥ 2♦ 9♥'."""
+    """Convierte listas o cadenas de cartas (ej. ['SJ', 'H6'], 'H5 D2 H9') a formato canónico 'J♠ 6♥', '5♥ 2♦ 9♥' deduplicando duplicadas."""
     if not cartas:
         return ""
     if isinstance(cartas, list):
         items = cartas
     else:
         items = str(cartas).replace(",", " ").split()
-    res = [formatear_carta_canonica(c) for c in items]
-    return " ".join([c for c in res if c])
+    res = []
+    seen = set()
+    for c in items:
+        canon = formatear_carta_canonica(c)
+        if canon and canon not in seen:
+            seen.add(canon)
+            res.append(canon)
+    return " ".join(res)
 
 
 def parsear_lista_cartas(cartas_str: str) -> List[Tuple[str, str]]:
@@ -212,8 +218,11 @@ def clasificar_mano_preflop(
     # Ajustes contextuales 3-Max
     if pos_norm == "BTN" and sit_norm == "open" and tier == "C":
         score += 5
-    elif pos_norm == "SB" and sit_norm == "vs_raise" and tier in ("C", "BASURA"):
-        score -= 6
+    elif pos_norm == "SB" and sit_norm == "vs_raise":
+        if tier in ("C", "BASURA"):
+            score -= 6
+        elif tier == "B":
+            score -= 5
     elif sit_norm in ("vs_3bet", "vs_allin"):
         if tier in ("C", "BASURA"):
             score -= 12
@@ -693,8 +702,10 @@ def calcular_pot_odds_y_sizing(
 
     bb = float(big_blind or getattr(config, "BIG_BLIND_DEFAULT", 20.0) or 20.0)
     # Auto-detección para partidas de micro-límites / dinero real (ej. €0.02 / €0.05)
-    if (bb == 20.0 and bote > 0 and bote < 5.0) or bb <= 0:
+    if big_blind is None and bote > 0 and bote < 5.0 and isinstance(bote_str, float):
         bb = 0.02 if (bote > 0 and bote <= 0.50) else (0.10 if bote <= 2.0 else 0.50)
+    elif bb <= 0:
+        bb = 20.0
 
     pot_odds_pct = 0.0
     if a_igualar > 0 and (bote + a_igualar) > 0:
@@ -795,6 +806,8 @@ def analizar_textura_mesa_y_blockers(mis_cartas_str: str, comunitarias_str: str)
                 "sets, dobles parejas y top pairs junto con faroles de backdoor o aire."
             )
 
+    blockers_nut_info = analizar_blockers_y_nut_effect(mis_cartas_str, comunitarias_str)
+
     return {
         "textura_mesa": textura,
         "posible_color": posible_color,
@@ -804,6 +817,41 @@ def analizar_textura_mesa_y_blockers(mis_cartas_str: str, comunitarias_str: str)
         "blockers_ases": blockers_ases,
         "blockers_reyes": blockers_reyes,
         "estimacion_rango": estimacion_rango,
+        **blockers_nut_info,
+    }
+
+
+def analizar_blockers_y_nut_effect(mis_cartas_str: str, comunitarias_str: str) -> Dict[str, Any]:
+    """Calcula si nuestras cartas privadas bloquean los frutos más fuertes (Nut Flush / Nut Straight) del rival."""
+    cartas_mano = parsear_lista_cartas(mis_cartas_str)
+    cartas_mesa = parsear_lista_cartas(comunitarias_str)
+
+    tiene_nut_flush_blocker = False
+    tiene_nut_straight_blocker = False
+    blocker_nut_score = 0.0
+
+    if cartas_mano and cartas_mesa:
+        # 1. Nut Flush Blocker (Tener el As del palo que tiene 3+ cartas en mesa)
+        palos_mesa = [s for _, s in cartas_mesa if s]
+        for s in set(palos_mesa):
+            if palos_mesa.count(s) >= 3:
+                if any(r == "A" and suit == s for r, suit in cartas_mano):
+                    tiene_nut_flush_blocker = True
+                    blocker_nut_score += 0.50
+
+        # 2. Nut Straight Blocker (Tener As o Rey en mesa coordinada)
+        ranks_mano = {r for r, _ in cartas_mano}
+        if "A" in ranks_mano or "K" in ranks_mano:
+            tiene_nut_straight_blocker = True
+            blocker_nut_score += 0.30
+
+    tiene_key_blocker = bool(tiene_nut_flush_blocker or tiene_nut_straight_blocker or any(r in ("A", "K") for r, _ in cartas_mano))
+
+    return {
+        "tiene_nut_flush_blocker": tiene_nut_flush_blocker,
+        "tiene_nut_straight_blocker": tiene_nut_straight_blocker,
+        "blocker_nut_score": round(min(1.0, blocker_nut_score), 2),
+        "tiene_key_blocker": tiene_key_blocker,
     }
 
 

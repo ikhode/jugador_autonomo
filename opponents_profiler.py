@@ -6,6 +6,7 @@ intervalos de Wilson, suavizado bayesiano y clasificación calibrada para 3-Max.
 """
 from __future__ import annotations
 
+import atexit
 from contextlib import closing
 from datetime import datetime, timezone
 import json
@@ -17,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from db_models import Base, Oponente
 
@@ -111,16 +113,19 @@ def _ensure_oponentes_schema(target_engine) -> None:
 engine = create_engine(
     f"sqlite:///{DB_PATH}",
     connect_args={"check_same_thread": False, "timeout": 30.0},
+    poolclass=NullPool,
 )
+atexit.register(engine.dispose)
 _configure_sqlite_engine(engine)
-SessionLocal = sessionmaker(bind=engine)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def inicializar_db(target_engine=None) -> None:
+    eng = target_engine or engine
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _ensure_oponentes_schema(target_engine or engine)
+    _ensure_oponentes_schema(eng)
     try:
-        with (target_engine or engine).begin() as conn:
+        with eng.begin() as conn:
             conn.execute(
                 text(
                     "DELETE FROM oponentes WHERE player_id LIKE 'Time:%' OR nickname LIKE 'Time:%' "
@@ -129,6 +134,8 @@ def inicializar_db(target_engine=None) -> None:
             )
     except Exception:
         pass
+    if ":memory:" not in str(getattr(eng, "url", "")):
+        eng.dispose()
 
 
 inicializar_db()
@@ -149,6 +156,8 @@ def es_nickname_invalido(raw: Optional[str]) -> bool:
     if re.match(r"^\d{1,2}:\d{2}$", txt):
         return True
     if txt.lower() in ("thinking...", "pensando...", "wait", "esperando", "dealer", "crupier", "table", "mesa"):
+        return True
+    if re.match(r"^(Asiento|Seat|Rival_Asiento|Player)[\s_-]*\d+$", txt, flags=re.IGNORECASE):
         return True
     return False
 
@@ -381,14 +390,22 @@ class OpponentProfiler:
         self._lock = threading.RLock()
         self._hand_flags: Dict[Tuple[str, str], set[str]] = {}
         if db_path is not None:
-            self.db_path = Path(db_path).resolve()
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._engine = create_engine(
-                f"sqlite:///{self.db_path}",
-                connect_args={"check_same_thread": False, "timeout": 30.0},
-            )
+            if str(db_path) == ":memory:":
+                self.db_path = Path(":memory:")
+                self._engine = create_engine(
+                    "sqlite:///:memory:",
+                    connect_args={"check_same_thread": False},
+                )
+            else:
+                self.db_path = Path(db_path).resolve()
+                self.db_path.parent.mkdir(parents=True, exist_ok=True)
+                self._engine = create_engine(
+                    f"sqlite:///{self.db_path}",
+                    connect_args={"check_same_thread": False, "timeout": 30.0},
+                    poolclass=NullPool,
+                )
             _configure_sqlite_engine(self._engine)
-            self._SessionLocal = sessionmaker(bind=self._engine)
+            self._SessionLocal = sessionmaker(bind=self._engine, expire_on_commit=False)
             inicializar_db(self._engine)
         else:
             self.db_path = DB_PATH
@@ -799,10 +816,14 @@ class OpponentProfiler:
         cbet_pct = round(min(100.0, (cbet_cnt / cbet_opps) * 100.0), 1) if cbet_opps > 0 else 0.0
         fold_to_cbet_pct = round(min(100.0, (fold_cbet / fold_cbet_opps) * 100.0), 1) if fold_cbet_opps > 0 else 0.0
 
-        # Métricas avanzadas: Check-Raise, Limp-Fold y C-Bet por calle
+        # Métricas avanzadas: Check-Raise, Fold to Check-Raise, Limp-Fold, C-Bet por calle y River Fold to Barrel
         cr_cnt = getattr(oponente, "check_raises", 0) or 0
         cr_opps = getattr(oponente, "check_raise_opps", 0) or 0
         cr_pct = round(min(100.0, (cr_cnt / cr_opps) * 100.0), 1) if cr_opps > 0 else 0.0
+
+        fold_cr_cnt = getattr(oponente, "fold_to_check_raise", 0) or 0
+        fold_cr_opps = getattr(oponente, "fold_to_check_raise_opps", 0) or 0
+        fold_to_check_raise_pct = round(min(100.0, (fold_cr_cnt / fold_cr_opps) * 100.0), 1) if fold_cr_opps > 0 else 0.0
 
         limps = getattr(oponente, "limp_count", 0) or 0
         limp_folds = getattr(oponente, "limp_fold_count", 0) or 0
@@ -826,10 +847,14 @@ class OpponentProfiler:
         b_flop, c_flop = getattr(oponente, "bets_flop", 0) or 0, getattr(oponente, "calls_flop", 0) or 0
         b_turn, c_turn = getattr(oponente, "bets_turn", 0) or 0, getattr(oponente, "calls_turn", 0) or 0
         b_river, c_river = getattr(oponente, "bets_river", 0) or 0, getattr(oponente, "calls_river", 0) or 0
+        f_river = getattr(oponente, "folds_river", 0) or 0
 
         af_flop = round(b_flop / max(1, c_flop), 2) if (b_flop + c_flop) > 0 else af
         af_turn = round(b_turn / max(1, c_turn), 2) if (b_turn + c_turn) > 0 else af
         af_river = round(b_river / max(1, c_river), 2) if (b_river + c_river) > 0 else af
+
+        river_opps = c_river + b_river + f_river
+        river_fold_to_barrel_pct = round(min(100.0, (f_river / river_opps) * 100.0), 1) if river_opps > 0 else 0.0
 
         wtsd_pct = round(min(100.0, (wtsd / saw_flop) * 100.0), 1) if saw_flop > 0 else 0.0
         wwsf_pct = round(min(100.0, (wwsf / saw_flop) * 100.0), 1) if saw_flop > 0 else 0.0
@@ -863,6 +888,8 @@ class OpponentProfiler:
             "fold_to_cbet_pct": fold_to_cbet_pct,
             "fold_to_cbet_opportunities": fold_cbet_opps,
             "check_raise_pct": cr_pct,
+            "fold_to_check_raise_pct": fold_to_check_raise_pct,
+            "river_fold_to_barrel_pct": river_fold_to_barrel_pct,
             "limp_fold_pct": limp_fold_pct,
             "agresividad": af,
             "af_flop": af_flop,
@@ -922,6 +949,11 @@ class OpponentProfiler:
     def close(self) -> None:
         """Cierra el pool de conexiones SQLite del perfilador de oponentes."""
         with self._lock:
+            try:
+                from sqlalchemy.orm import close_all_sessions
+                close_all_sessions()
+            except Exception:
+                pass
             if hasattr(self, "_engine") and self._engine:
                 try:
                     self._engine.dispose()

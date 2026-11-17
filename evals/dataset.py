@@ -187,20 +187,19 @@ def load_eval_dataset(
     target_db = Path(db_path) if db_path else Path(__file__).resolve().parent.parent / "logs" / "poker_stats.db"
     if target_db.exists():
         try:
-            conn = sqlite3.connect(f"file:{target_db}?mode=ro", uri=True)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT decision_uid, street, hole_cards, board, pot_size, to_call,
-                       effective_stack, big_blind, legal_actions, gto_recommended_action,
-                       ev_by_action_json, position
-                FROM analytics_decisions
-                WHERE evaluation_available = 1
-                ORDER BY is_synthetic ASC, timestamp DESC
-                LIMIT 300
-                """
-            ).fetchall()
-            conn.close()
+            with sqlite3.connect(f"file:{target_db}?mode=ro", uri=True) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """
+                    SELECT decision_uid, street, hole_cards, board, pot_size, to_call,
+                           effective_stack, big_blind, legal_actions, gto_recommended_action,
+                           ev_by_action_json, position
+                    FROM analytics_decisions
+                    WHERE evaluation_available = 1
+                    ORDER BY is_synthetic ASC, timestamp DESC
+                    LIMIT 300
+                    """
+                ).fetchall()
 
             for r in rows:
                 d = dict(r)

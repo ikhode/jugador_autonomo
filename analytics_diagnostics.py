@@ -235,7 +235,7 @@ def generar_diagnosticos_inteligentes(analytics_data: Dict[str, Any]) -> List[Di
             ),
         })
 
-    # 3. Pérdidas concentradas en una posición específica (Positional Leak)
+    # 3. Pérdidas concentradas o regret elevado en una posición específica (Positional Leak / Optimization)
     pos_perf = strat.get("performance_by_position", {})
     for pos_name, pdata in pos_perf.items():
         pos_h = int(pdata.get("hands") or 0)
@@ -245,10 +245,21 @@ def generar_diagnosticos_inteligentes(analytics_data: Dict[str, Any]) -> List[Di
         # En BB se espera perder parte de la ciega obligatoria, pero en BTN o SB una pérdida fuerte de EV es crítica
         threshold_ev = -15.0 if pos_name == "BB" else (-5.0 if pos_name == "SB" else 0.0)
         if pos_h >= 10 and (pos_ev_bb100 < threshold_ev or (pos_ev_lost / max(1, pos_h)) * 100.0 > 25.0):
+            es_ganadora = pos_ev_bb100 > 0.0
+            problema = (
+                f"Oportunidad de optimización de valor (Regret) en {pos_name}"
+                if es_ganadora else
+                f"Fuga de rentabilidad (Leak) concentrada en la posición {pos_name}"
+            )
+            causa = (
+                f"Sizing subóptimo o valor dejado sobre la mesa postflop en {pos_name} a pesar de tener winrate positivo."
+                if es_ganadora else
+                f"Defensa demasiado amplia fuera de posición en {pos_name} o pagos postflop fuera de Pot Odds."
+            )
             diagnosticos.append({
                 "id_diagnostico": f"DIAG_POS_LEAK_{pos_name}",
                 "severidad": "CRITICA" if pos_ev_bb100 < threshold_ev - 10.0 else "ADVERTENCIA",
-                "problema_detectado": f"Fuga de rentabilidad (Leak) concentrada en la posición {pos_name}",
+                "problema_detectado": problema,
                 "evidencia_estadistica": (
                     f"En {pos_name} ({pos_h} manos): EV Winrate = {pos_ev_bb100:+.2f} BB/100, "
                     f"Winrate Real = {pos_real_bb100:+.2f} BB/100, EV perdido acumulado = {pos_ev_lost:.2f} BB "
@@ -256,10 +267,7 @@ def generar_diagnosticos_inteligentes(analytics_data: Dict[str, Any]) -> List[Di
                 ),
                 "metricas_afectadas": [f"EV BB/100 ({pos_name})", f"Winrate Real ({pos_name})", "EV Lost BB"],
                 "nivel_confianza": _confianza_por_muestra(pos_h),
-                "posible_causa": (
-                    f"Defensa demasiado amplia fuera de posición en {pos_name} o pagos postflop fuera de Pot Odds "
-                    "sin ventaja posicional."
-                ),
+                "posible_causa": causa,
                 "recomendacion_investigacion": (
                     f"Filtrar el Historial de Manos por posición = {pos_name} y auditar las decisiones con mayor "
                     "Regret (ΔEV) en Flop y Turn."

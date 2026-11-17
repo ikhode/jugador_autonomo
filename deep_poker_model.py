@@ -22,20 +22,31 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Importación segura de TensorFlow / Keras con fallback a NumPy si TF no estuviera instalado
-try:
-    import tensorflow as tf
-    from tensorflow import keras
-    from tensorflow.keras import layers
-    TENSORFLOW_AVAILABLE = True
-    # Silenciar logs excesivos de C++ de TensorFlow
-    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-except Exception as e:
-    tf = None
-    keras = None
-    layers = None
-    TENSORFLOW_AVAILABLE = False
-    logger.info("⚠️ TensorFlow no disponible (%s); utilizando fallback matricial NumPy.", e)
+tf = None
+keras = None
+layers = None
+_tf_loaded = False
+TENSORFLOW_AVAILABLE = False
+
+def _ensure_tf_loaded() -> bool:
+    global tf, keras, layers, _tf_loaded, TENSORFLOW_AVAILABLE
+    if _tf_loaded:
+        return TENSORFLOW_AVAILABLE
+    _tf_loaded = True
+    try:
+        os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+        os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+        import tensorflow as _tf
+        from tensorflow import keras as _keras
+        from tensorflow.keras import layers as _layers
+        tf = _tf
+        keras = _keras
+        layers = _layers
+        TENSORFLOW_AVAILABLE = True
+    except Exception as e:
+        TENSORFLOW_AVAILABLE = False
+        logger.info("⚠️ TensorFlow no disponible (%s); utilizando fallback matricial NumPy.", e)
+    return TENSORFLOW_AVAILABLE
 
 # Ensure aria_poker is in path for card parsing & equity calculations
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'aria_poker'))
@@ -129,12 +140,17 @@ class PokerValuePolicyNetwork:
         self.model = self._build_model()
 
     def _build_model(self):
-        if TENSORFLOW_AVAILABLE:
+        if _ensure_tf_loaded():
             models_dir = Path(__file__).resolve().parent / "models"
             weights_file = models_dir / "poker_tf_policy_value.keras"
             if weights_file.is_file():
                 try:
-                    loaded = keras.models.load_model(str(weights_file))
+                    loaded = keras.models.load_model(str(weights_file), compile=False)
+                    loaded.compile(
+                        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+                        loss={"policy_head": "categorical_crossentropy", "value_head": "mean_squared_error"},
+                        loss_weights={"policy_head": 1.0, "value_head": 0.5},
+                    )
                     logger.info("✅ Pesos preentrenados de PokerValuePolicyNetwork cargados desde %s", weights_file)
                     return loaded
                 except Exception as e:
@@ -222,13 +238,15 @@ class DeepCFRSolver:
         self.regret_memory = collections.deque(maxlen=5000)
 
     def _build_network(self, name: str, activation: str):
-        if TENSORFLOW_AVAILABLE:
+        if _ensure_tf_loaded():
             models_dir = Path(__file__).resolve().parent / "models"
             file_name = "deep_cfr_advantage.keras" if name == "advantage_net" else "deep_cfr_strategy.keras"
             weights_file = models_dir / file_name
             if weights_file.is_file():
                 try:
-                    loaded = keras.models.load_model(str(weights_file))
+                    loaded = keras.models.load_model(str(weights_file), compile=False)
+                    loss_name = "mse" if activation == "linear" else "categorical_crossentropy"
+                    loaded.compile(optimizer=keras.optimizers.Adam(learning_rate=0.001), loss=loss_name)
                     logger.info("✅ Pesos preentrenados de DeepCFRSolver (%s) cargados desde %s", name, weights_file)
                     return loaded
                 except Exception as e:
@@ -296,12 +314,13 @@ class DeepRLDQNAgent:
         self.target_q_network = self._build_q_net("target_q_net")
 
     def _build_q_net(self, name: str):
-        if TENSORFLOW_AVAILABLE:
+        if _ensure_tf_loaded():
             models_dir = Path(__file__).resolve().parent / "models"
             weights_file = models_dir / "deep_rl_dqn.keras"
             if weights_file.is_file():
                 try:
-                    loaded = keras.models.load_model(str(weights_file))
+                    loaded = keras.models.load_model(str(weights_file), compile=False)
+                    loaded.compile(optimizer=keras.optimizers.Adam(learning_rate=0.001), loss="mse")
                     logger.info("✅ Pesos preentrenados de DeepRLDQNAgent cargados desde %s", weights_file)
                     return loaded
                 except Exception as e:

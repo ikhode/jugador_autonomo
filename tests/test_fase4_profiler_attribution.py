@@ -24,8 +24,8 @@ class TestFase4ProfilerAndAttribution(unittest.TestCase):
     def tearDown(self):
         try:
             self.profiler.close()
-            if hasattr(self.profiler, "_SessionLocal"):
-                self.profiler._SessionLocal.close_all()
+            from sqlalchemy.orm import close_all_sessions
+            close_all_sessions()
         except Exception:
             pass
         try:

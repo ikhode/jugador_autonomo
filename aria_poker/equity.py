@@ -66,13 +66,15 @@ def _build_table(sims: int = 6000, seed: int = 7):
 def _load():
     if os.path.exists(_CACHE):
         try:
-            d = json.load(open(_CACHE))
+            with open(_CACHE, "r", encoding="utf-8") as f:
+                d = json.load(f)
             return {int(k): v for k, v in d["eq"].items()}, {int(k): v for k, v in d["pct"].items()}
         except Exception:
             pass
     eq, pct = _build_table()
     try:
-        json.dump({"eq": eq, "pct": pct}, open(_CACHE, "w"))
+        with open(_CACHE, "w", encoding="utf-8") as f:
+            json.dump({"eq": eq, "pct": pct}, f)
     except OSError:
         pass
     return eq, pct
@@ -94,18 +96,26 @@ def unseen_cards(known) -> list:
     return [c for c in range(52) if c not in k]
 
 
-def made_pct(hole, board, rng: random.Random, m: int = 60) -> float:
-    """Percentil de la mano hecha (sin proyectos) frente a m manos rivales al azar."""
-    if not board:
-        return preflop_pct(hole)
-    rest = unseen_cards(tuple(hole) + tuple(board))
-    me = evaluate(list(hole) + list(board))
+import functools
+
+@functools.lru_cache(maxsize=32768)
+def _made_pct_cached(hole_tuple: tuple, board_tuple: tuple, m: int = 25) -> float:
+    rest = unseen_cards(hole_tuple + board_tuple)
+    me = evaluate(list(hole_tuple) + list(board_tuple))
     win = 0.0
+    rng = random.Random(42)
     for _ in range(m):
         o = rng.sample(rest, 2)
-        s = evaluate(o + list(board))
+        s = evaluate(o + list(board_tuple))
         win += 1.0 if me > s else (0.5 if me == s else 0.0)
     return win / m
+
+
+def made_pct(hole, board, rng: random.Random = None, m: int = 25) -> float:
+    """Percentil de la mano hecha con cache ultra-rápida en memoria."""
+    if not board:
+        return preflop_pct(hole)
+    return _made_pct_cached(tuple(hole), tuple(board), m)
 
 
 def draw_floor(hole, board) -> float:

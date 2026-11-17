@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import config
 from opponents_profiler import (
     OpponentProfiler,
     generar_analisis_explotativo_contextual,
@@ -125,14 +126,25 @@ class LiveTableMonitor:
         # Últimos eventos detectados en mesa (entradas, salidas, cambios)
         self.table_events: List[str] = []
 
+        # Mapeos robustos seat <-> playerCode (reconciliación 10008, 94007, 10041)
+        self.seat_to_code: Dict[int, str] = {}
+        self.code_to_seat: Dict[str, int] = {}
+        self.code_to_nick: Dict[str, str] = {}
+        self.code_to_device: Dict[str, str] = {}
+        self.code_to_anon: Dict[str, bool] = {}
+        self.code_seen_at: Dict[str, float] = {}
+
     def _es_hero(self, player_id: str = "", nickname: str = "", is_hero_flag: bool = False) -> bool:
         if is_hero_flag:
             return True
         pid = str(player_id or "").strip()
         nick = str(nickname or "").strip()
-        if self.hero_player_id and pid and pid == self.hero_player_id:
+        cfg_hero_id = str(getattr(config, "HERO_ID", "41194898")).strip()
+        cfg_hero_nick = str(getattr(config, "HERO_NICKNAME", "Belnebu")).strip()
+
+        if (self.hero_player_id and pid and pid == self.hero_player_id) or (cfg_hero_id and pid and cfg_hero_id in pid):
             return True
-        if self.hero_nickname and nick and nick.lower() == self.hero_nickname.lower():
+        if (self.hero_nickname and nick and nick.lower() == self.hero_nickname.lower()) or (cfg_hero_nick and nick and cfg_hero_nick.lower() in nick.lower()):
             return True
         return False
 
@@ -358,7 +370,7 @@ class LiveTableMonitor:
                     )
                     continue
 
-                if status == "EMPTY" or (not nick and not pid):
+                if status == "EMPTY" or (not nick and not pid) or es_nickname_invalido(nick):
                     self.marcar_asiento_vacio(int(seat))
                     continue
 
@@ -401,6 +413,10 @@ class LiveTableMonitor:
                     nick = f"Rival_Asiento_{seat}" if not is_hero else (self.hero_nickname or "Belnebu")
                     pid = f"Seat_{seat}" if not is_hero else "Hero"
 
+                if es_nickname_invalido(nick):
+                    self.marcar_asiento_vacio(int(seat))
+                    continue
+
                 raw_state = ps.get("state") or ps.get("status") or "ACTIVO"
                 if ps.get("sitOut") or ps.get("isSittingOut"):
                     raw_state = "SIT_OUT"
@@ -441,27 +457,75 @@ class LiveTableMonitor:
 
     def obtener_conteos_mesa(self) -> Dict[str, int]:
         with self._lock:
-            oponentes_sentados = [p for p in self.players.values() if p.get("status") != "EMPTY"]
+            todos_sentados = [p for p in self.players.values() if p.get("status") != "EMPTY"]
+            oponentes_sentados = [p for p in todos_sentados if not p.get("is_hero")]
+
             hero_presente = 1 if (self.hero_seat is not None or self.hero_player_id or self.hero_nickname) else 0
-            asientos_ocupados = min(self.max_asientos, len(oponentes_sentados) + hero_presente)
-            oponentes_activos = [
-                p for p in oponentes_sentados
-                if p.get("status") not in ("SIT_OUT", "DISCONNECTED", "ELIMINATED")
-            ]
-            oponentes_en_mano = [
-                p for p in oponentes_activos
-                if p.get("status") != "FOLDED"
-            ]
+            asientos_ocupados = min(self.max_asientos, len(todos_sentados) + hero_presente)
+
+            jugadores_activos = len([p for p in todos_sentados if p.get("status") not in ("SIT_OUT", "DISCONNECTED", "ELIMINATED", "EMPTY")]) + hero_presente
+            jugadores_en_mano = len([p for p in todos_sentados if p.get("status") not in ("SIT_OUT", "DISCONNECTED", "ELIMINATED", "EMPTY", "FOLDED")]) + hero_presente
+            oponentes_en_mano = len([p for p in oponentes_sentados if p.get("status") not in ("SIT_OUT", "DISCONNECTED", "ELIMINATED", "EMPTY", "FOLDED")])
+
             return {
                 "max_asientos": self.max_asientos,
                 "asientos_ocupados": asientos_ocupados,
-                "asientos_disponibles": max(0, self.max_asientos - asientos_ocupados),
-                "jugadores_activos": len(oponentes_activos) + hero_presente,
-                "jugadores_en_mano": len(oponentes_en_mano) + hero_presente,
                 "numero_oponentes_mesa": len(oponentes_sentados),
-                "numero_oponentes_activos": len(oponentes_activos),
-                "numero_oponentes_en_mano": len(oponentes_en_mano),
+                "jugadores_activos": jugadores_activos,
+                "jugadores_en_mano": jugadores_en_mano,
+                "numero_oponentes_en_mano": oponentes_en_mano,
+                "oponentes_activos": len([p for p in oponentes_sentados if p.get("status") not in ("SIT_OUT", "DISCONNECTED", "ELIMINATED", "EMPTY")]),
             }
+
+    def imprimir_estado_mesa(self, decision_res: Optional[Dict[str, Any]] = None, force: bool = False) -> None:
+        """Muestra en consola el estado actual de cada jugador en la mesa con throttling inteligente para evitar spam en bucles de sondeo."""
+        with self._lock:
+            sig_parts = [f"hero:{self.hero_stack},seat:{self.hero_seat}"]
+            for k, p in sorted(self.players.items(), key=lambda x: int(x[1].get("seat") or 99)):
+                sig_parts.append(f"{p.get('seat')}:{p.get('nickname')}:{p.get('stack')}:{p.get('bet')}:{p.get('status')}:{p.get('is_turn')}")
+            current_sig = "|".join(sig_parts)
+
+            now = time.time()
+            if not force and decision_res is None and current_sig == getattr(self, "_last_printed_signature", "") and (now - getattr(self, "_last_print_time", 0.0) < 3.0):
+                return
+
+            self._last_printed_signature = current_sig
+            self._last_print_time = now
+
+            print("\n" + "=" * 98)
+            print(f"🃏 [ESTADO DE MESA EN VIVO & ML TELEMETRY] — Asientos ocupados: {len(self.players)} oponentes + Hero")
+            print(f"{'Asiento':<8} | {'Nick / Jugador':<16} | {'Stack':<9} | {'Apuesta':<9} | {'Estado':<10} | {'Estilo / Perfil':<16} | {'Predicción / Bluff Prob'}")
+            print("-" * 98)
+
+            if self.hero_seat is not None or self.hero_nickname:
+                print(f"#{str(self.hero_seat or 'H'):<7} | {str(self.hero_nickname or 'Hero'):<16} | {float(self.hero_stack):<9.2f} | {'-':<9} | {'HERO':<10} | {'GTO / Híbrido':<16} | {'-':<22}")
+
+            pred_dict = (decision_res or {}).get("opponent_prediction", {})
+            bluff_p = (decision_res or {}).get("bluff_probability", pred_dict.get("bluff_probability", 0.0))
+
+            for k, p in sorted(self.players.items(), key=lambda x: int(x[1].get("seat") or 99)):
+                seat = p.get("seat", "?")
+                nick = p.get("nickname", "Desconocido")
+                stack = p.get("stack", 0.0)
+                bet = p.get("bet", 0.0)
+                status = p.get("status", "ACTIVE")
+                pid = p.get("player_id", "")
+
+                estilo = "Desconocido"
+                try:
+                    perfil = self.profiler.obtener_perfil_explotativo(pid, nick)
+                    estilo = perfil.get("estilo", "Desconocido")
+                except Exception:
+                    pass
+
+                bluff_str = f"Bluff: {bluff_p*100:.1f}%"
+                if pred_dict and p.get("is_turn"):
+                    pred_act = pred_dict.get("predicted_action", "N/A")
+                    bluff_str = f"Pred: {pred_act} (Bluff: {bluff_p*100:.0f}%)"
+
+                turn_indicator = " 👈 [TURNO]" if p.get("is_turn") else ""
+                print(f"#{str(seat):<7} | {str(nick)[:16]:<16} | {float(stack):<9.2f} | {float(bet):<9.2f} | {str(status):<10} | {str(estilo):<16} | {str(bluff_str):<22}{turn_indicator}")
+            print("=" * 98 + "\n")
 
     def obtener_perfiles_oponentes(
         self,
@@ -551,6 +615,103 @@ class LiveTableMonitor:
             if self.persist_live_file:
                 self._guardar_snapshot_archivo(snapshot)
             return snapshot
+
+    def procesar_ws_10008(self, d: Dict[str, Any]) -> None:
+        """Procesa mensaje 10008: fuente primaria de playerCode, seatIndex, removeSeatIndex y metadatos."""
+        with self._lock:
+            p = d.get("player") or {}
+            seat = p.get("seatIndex")
+            code = p.get("playerCode")
+            nick = _sanitizar_nickname(p.get("nickname"))
+            rem = p.get("removeSeatIndex")
+            device = p.get("deviceCategory")
+            anon = p.get("anonymousPlayer")
+
+            # ---- CASO 1: jugador se VA ----
+            if rem not in (None, -1):
+                code_old = self.seat_to_code.get(rem)
+                if code_old is not None:
+                    self.seat_to_code.pop(rem, None)
+                    self.code_to_seat.pop(code_old, None)
+                    self._registrar_evento_mesa(f"WS_SEAT_LEAVE: seat={rem} code={code_old} nick={self.code_to_nick.get(code_old)}")
+                self.remover_jugador(seat=rem)
+                return
+
+            if code is None or seat is None:
+                return
+
+            code_str = str(code)
+            prev = self.seat_to_code.get(seat)
+            if prev is not None and prev != code_str:
+                self.code_to_seat.pop(prev, None)
+                self._registrar_evento_mesa(f"WS_SEAT_SWAP: seat={seat} antes={prev} ahora={code_str} ({nick})")
+
+            self.seat_to_code[int(seat)] = code_str
+            self.code_to_seat[code_str] = int(seat)
+            if nick:
+                self.code_to_nick[code_str] = nick
+            if device:
+                self.code_to_device[code_str] = device
+            if anon is not None:
+                self.code_to_anon[code_str] = bool(anon)
+            self.code_seen_at[code_str] = time.time()
+
+            self.actualizar_jugador(
+                player_id=code_str,
+                nickname=nick,
+                seat=seat,
+                status=p.get("status"),
+                stack=p.get("chips"),
+                bet=p.get("bounty"),
+            )
+
+    def procesar_ws_94007(self, d: Dict[str, Any]) -> None:
+        """Procesa HUD 94007 para refuerzo / descubrimiento pasivo de playerCode."""
+        with self._lock:
+            for g in d.get("hudGameTypeStats") or []:
+                for s in g.get("hudTableStats") or []:
+                    code = s.get("playerCode")
+                    seat = s.get("seatIndex")
+                    if code and seat is not None:
+                        code_str = str(code)
+                        if seat not in self.seat_to_code:
+                            self.seat_to_code[int(seat)] = code_str
+                            self.code_to_seat[code_str] = int(seat)
+                            self._registrar_evento_mesa(f"WS_SEAT_MAP_HUD: seat={seat} → code={code_str} (vía HUD)")
+
+    def procesar_ws_10041(self, d: Dict[str, Any]) -> None:
+        """Procesa snapshot 10041 cruzando asientos con playerCode y validando nicks."""
+        with self._lock:
+            for p in d.get("players") or []:
+                seat = p.get("seatIndex")
+                nick = _sanitizar_nickname(p.get("nickname"))
+                code = p.get("playerCode")
+
+                if seat is None:
+                    continue
+
+                if code is None:
+                    code_mapped = self.seat_to_code.get(seat)
+                    if code_mapped and nick and self.code_to_nick.get(code_mapped) != nick:
+                        self.code_to_nick[code_mapped] = nick
+                    if code_mapped is None:
+                        self._registrar_evento_mesa(f"WS_SEAT_PENDING: seat={seat} nick={nick} sin playerCode")
+                else:
+                    code_str = str(code)
+                    self.seat_to_code[int(seat)] = code_str
+                    self.code_to_seat[code_str] = int(seat)
+                    if nick:
+                        self.code_to_nick[code_str] = nick
+
+    def resolver_code_por_asiento(self, seat: Optional[int]) -> Optional[str]:
+        if seat is None:
+            return None
+        return self.seat_to_code.get(int(seat))
+
+    def _fallback_key(self, nick: Optional[str], seat: Optional[int]) -> str:
+        if nick:
+            return "nick:" + " ".join(str(nick).lower().split())
+        return f"seat:{seat}"
 
     def _guardar_snapshot_archivo(self, snapshot: Dict[str, Any]) -> None:
         try:

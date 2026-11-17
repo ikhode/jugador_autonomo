@@ -28,30 +28,61 @@ from opponent_model import OpponentModel
 from game_state_manager import GameStateManager
 from decision_maker import DecisionMaker
 from live_table_tracker import LiveTableMonitor, cargar_snapshot_live_archivo
+from ws_decoder import configurar_interceptores as configurar_ws_interceptores
 
-table_tracker = None
+profiler = OpponentProfiler()
+table_tracker = LiveTableMonitor(profiler, max_asientos=getattr(config, "MAX_TABLE_SEATS", 3))
 
 def obtener_live_status() -> dict:
-    if "table_tracker" in globals() and table_tracker is not None:
-        tr = globals().get("tracker")
-        h_num = getattr(tr, "hand_number", 1) if tr else 1
-        c_street = getattr(tr, "current_street", "PREFLOP") if tr else "PREFLOP"
-        m_cards = getattr(tr, "my_cards", []) if tr else []
-        comm_cards = getattr(tr, "community_cards", []) if tr else []
-        l_pot = getattr(tr, "last_pot", 0.0) if tr else 0.0
-        pos_name = getattr(tr, "position_name", "DESCONOCIDA") if tr else "DESCONOCIDA"
-        l_events = getattr(tr, "current_hand_history", []) if tr else []
+    global tracker, table_tracker
+    try:
+        if table_tracker is not None:
+            tr = globals().get("tracker")
+            h_num = getattr(tr, "hand_number", 1) if tr else 1
+            c_street = getattr(tr, "current_street", "PREFLOP") if tr else "PREFLOP"
+            m_cards = getattr(tr, "my_cards", []) if tr else []
+            comm_cards = getattr(tr, "community_cards", []) if tr else []
+            l_pot = getattr(tr, "last_pot", 0.0) if tr else 0.0
+            pos_name = getattr(tr, "position_name", "DESCONOCIDA") if tr else "DESCONOCIDA"
+            l_events = getattr(tr, "current_hand_history", []) if tr else []
 
-        return table_tracker.obtener_snapshot_live(
-            hand_number=h_num,
-            current_street=c_street,
-            my_cards=m_cards,
-            community_cards=comm_cards,
-            last_pot=l_pot,
-            position_name=pos_name,
-            live_events=l_events,
-        )
-    return cargar_snapshot_live_archivo()
+            snap = table_tracker.obtener_snapshot_live(
+                hand_number=h_num,
+                current_street=c_street,
+                my_cards=m_cards,
+                community_cards=comm_cards,
+                last_pot=l_pot,
+                position_name=pos_name,
+                live_events=l_events,
+            )
+            if snap and (snap.get("my_cards") or snap.get("community_cards") or snap.get("live_events") or snap.get("opponents")):
+                return snap
+    except Exception:
+        pass
+
+    tr = globals().get("tracker")
+    max_seats = getattr(config, "MAX_TABLE_SEATS", 3)
+    return {
+        "hand_number": getattr(tr, "hand_number", 1) if tr else 1,
+        "current_street": getattr(tr, "current_street", "PREFLOP") if tr else "PREFLOP",
+        "my_cards": getattr(tr, "my_cards", []) if tr else [],
+        "community_cards": getattr(tr, "community_cards", []) if tr else [],
+        "last_pot": getattr(tr, "last_pot", 0) if tr else 0,
+        "position_name": getattr(tr, "position_name", "DESCONOCIDA") if tr else "DESCONOCIDA",
+        "modalidad": getattr(config, "POKER_MODE", "Twister 3-Max"),
+        "table_info": {
+            "max_asientos": max_seats,
+            "asientos_ocupados": 1,
+            "asientos_disponibles": max_seats - 1,
+            "jugadores_activos": 1,
+            "jugadores_en_mano": 1,
+            "numero_oponentes_mesa": 0,
+            "numero_oponentes_activos": 0,
+            "numero_oponentes_en_mano": 0,
+        },
+        "opponents": [],
+        "live_events": list(getattr(tr, "current_hand_history", [])) if tr and getattr(tr, "current_hand_history", []) else ["[00:00:00] Partida activa - Monitoreando mesa en vivo..."],
+    }
 
 # Pool de subprocesos persistente global para cero bloqueos de E/S o red
 bg_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -78,6 +109,8 @@ def log_json_estructurado(
     record = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "event_type": str(event),
+        "hand_id": str(hand_id or ""),
+        "decision_id": str(decision_id or ""),
         "hand_uid": str(hand_id or ""),
         "chosen_action": str(decision_id or ""),
     }
@@ -221,6 +254,37 @@ class GameTracker:
         self.preflop_raise_count: int = 0
         self.preflop_raiser_id: Optional[str] = None
         self.cbet_fired_in_hand: bool = False
+        self.table_id: str = ""
+        self.game_id: str = ""
+        self.round_id: str = ""
+        self.current_hand_key: str = ""
+
+    def iniciar_nueva_mano(self, table_id: str = "", game_id: str = "", round_id: str = ""):
+        """Inicializa limpiamente las variables de estado al comenzar una nueva mano sin arrastrar datos ajenos."""
+        nueva_clave = f"{table_id or getattr(self, 'table_id', '')}:{game_id or getattr(self, 'game_id', '')}:{round_id or getattr(self, 'round_id', '')}"
+        if nueva_clave and nueva_clave == getattr(self, 'current_hand_key', '') and (self.my_cards or self.community_cards):
+            return
+
+        if getattr(self, 'current_hand_key', '') and (self.my_cards or self.community_cards or len(self.current_hand_history) > 3):
+            self.finalizar_mano_actual("Transición a nueva mano/ronda")
+
+        if table_id: self.table_id = str(table_id)
+        if game_id: self.game_id = str(game_id)
+        if round_id: self.round_id = str(round_id)
+        self.current_hand_key = nueva_clave or f"hand_{self.hand_number}"
+
+        self.my_cards.clear()
+        self.community_cards.clear()
+        self.current_hand_history.clear()
+        self.prev_player_states.clear()
+        self.last_pot = 0
+        self.http_turn_signal = False
+        self.current_street = "PREFLOP"
+        self.current_round_no = 1
+        self.cbet_fired_in_hand = False
+        self.preflop_raise_count = 0
+        self.preflop_raiser_id = None
+        self.registrar_evento("LIFECYCLE", f"🎮 Inicializada mano #{self.hand_number} (Mesa: {getattr(self, 'table_id', 'N/A')}, Juego: {getattr(self, 'game_id', 'N/A')}, Ronda: {getattr(self, 'round_id', 'N/A')})")
 
     def registrar_evento(self, tipo: str, detalle: str):
         timestamp = time.strftime('%H:%M:%S')
@@ -836,15 +900,16 @@ def intentar_click(target, selector: str, descripcion: str, timeout: int = 4000)
     return False
 
 
-def verificar_accion_reflejada(target, accion: str, timeout_ms: int = 700) -> bool:
+def verificar_accion_reflejada(target, accion: str, timeout_ms: int = 1500) -> bool:
     """Verifica tras un clic que el turno o los botones de acción hayan cambiado en el DOM."""
     if accion not in ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN"):
         return True
     try:
         target.wait_for_function(
             """() => {
-                const btns = Array.from(document.querySelectorAll('.actions-area .action-button, .actions-area #FOLD, .actions-area #CHECK, .actions-area #CALL, .actions-area #BET, .actions-area #RAISE'));
-                return !btns.some(b => b.offsetWidth > 0 || b.offsetHeight > 0);
+                const btns = Array.from(document.querySelectorAll('#FOLD, #CHECK, #CALL, #BET, #RAISE, #ALLIN, .action-button, [class*="action-button"]'));
+                if (btns.length === 0) return true;
+                return !btns.some(b => (b.offsetWidth > 0 || b.offsetHeight > 0) && !b.disabled);
             }""",
             timeout=timeout_ms,
         )
@@ -914,6 +979,13 @@ def validar_accion(accion: str, monto: Any, estado_dom: Optional[dict]) -> Tuple
 
     botones = str(dom.get("botones_visibles") or dom.get("opciones_disponibles") or "").upper()
     a_igualar = _parse_num_dom(dom.get("a_igualar"), 0.0)
+    if a_igualar <= 0 and dom.get("apuestas_rivales"):
+        a_igualar = _parse_num_dom(dom.get("apuestas_rivales"), 0.0)
+    if a_igualar <= 0 and botones:
+        import re
+        m_call = re.search(r'CALL\s*\((\d+)\)', botones)
+        if m_call:
+            a_igualar = float(m_call.group(1))
     mi_stack = _parse_num_dom(dom.get("mi_stack"), 0.0)
     big_blind = _parse_num_dom(dom.get("big_blind"), float(getattr(config, "BIG_BLIND_DEFAULT", 20.0)))
     if big_blind <= 0:
@@ -1749,10 +1821,8 @@ import random
 
 def aplicar_delay_humanizado(accion: str, dom_data: Optional[dict] = None, tiempo_ia_seg: float = 0.0) -> float:
     """
-    Aplica una pausa calculada y realista para simular tiempo de reflexión humano
-    de clase mundial (World-Class Human Timing Engine).
-    Compensa el tiempo ya transcurrido en inferencia/red para que el tiempo total de turno
-    se ajuste a una distribución humana realista (2.5s - 7.5s) según calle, acción y tamaño del bote.
+    Aplica una pausa calculada y ágil para simular tiempo de reflexión humano
+    evitando desincronización y timeouts en la mesa.
     """
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return 0.01
@@ -1760,104 +1830,53 @@ def aplicar_delay_humanizado(accion: str, dom_data: Optional[dict] = None, tiemp
     dom = dom_data or {}
     street = str((dom.get("gto_preflop") or {}).get("situacion") or dom.get("street") or "PREFLOP").upper()
     tier = str((dom.get("gto_preflop") or {}).get("tier") or "DESCONOCIDO").upper()
-    gto_math = dom.get("gto_math") or {}
-    bote_bb = float(gto_math.get("bote_bb") or 0.0)
-    a_igualar_bb = float(gto_math.get("a_igualar_bb") or 0.0)
 
-    # 1. Determinar target_mean y sigma según la complejidad del spot
-    if "PREFLOP" in street:
-        if accion == "FOLD":
-            target_mean = 2.8 if tier in ("BASURA", "C") else 3.5
-            sigma = 0.4
-        elif accion == "CHECK":
-            target_mean = 2.6
-            sigma = 0.35
-        elif accion == "CALL":
-            target_mean = 3.3
-            sigma = 0.5
-        elif accion in ("RAISE", "BET"):
-            target_mean = 4.0
-            sigma = 0.6
-        elif accion in ("ALL_IN", "ALLIN"):
-            target_mean = 5.2
-            sigma = 0.8
-        else:
-            target_mean = 3.0
-            sigma = 0.5
-    elif "FLOP" in street:
-        if accion == "CHECK":
-            target_mean = 3.2
-            sigma = 0.5
-        elif accion in ("CALL", "BET"):
-            target_mean = 4.0
-            sigma = 0.6
-        elif accion in ("RAISE", "ALL_IN", "ALLIN"):
-            target_mean = 5.4
-            sigma = 0.8
-        elif accion == "FOLD":
-            target_mean = 3.4
-            sigma = 0.5
-        else:
-            target_mean = 3.5
-            sigma = 0.5
-    elif "TURN" in street:
-        if accion == "CHECK":
-            target_mean = 3.8
-            sigma = 0.6
-        elif accion in ("CALL", "BET"):
-            target_mean = 4.6
-            sigma = 0.7
-        elif accion in ("RAISE", "ALL_IN", "ALLIN"):
-            target_mean = 6.0
-            sigma = 0.9
-        elif accion == "FOLD":
-            target_mean = 4.2
-            sigma = 0.6
-        else:
-            target_mean = 4.0
-            sigma = 0.6
-    else:  # RIVER
-        if accion == "CHECK":
-            target_mean = 4.8
-            sigma = 0.7
-        elif accion in ("CALL", "BET"):
-            target_mean = 5.8
-            sigma = 0.9
-        elif accion in ("RAISE", "ALL_IN", "ALLIN"):
-            target_mean = 6.8
-            sigma = 1.0
-        elif accion == "FOLD":
-            target_mean = 5.0
-            sigma = 0.8
-        else:
-            target_mean = 5.0
-            sigma = 0.7
-
-    # Si el bote es grande o enfrentamos una apuesta pesada, sumar reflexión extra
-    if bote_bb >= 6.0 or a_igualar_bb >= 4.0:
-        target_mean *= 1.25
-
-    # Simulación de "Tanking" ocasional (10% de probabilidad en spots complejos)
-    if random.random() < 0.10 and ("PREFLOP" not in street or a_igualar_bb > 2.0):
-        target_mean += random.uniform(1.5, 2.5)
+    # Tiempos naturales y ágiles (0.8s - 3.2s) para mantener perfecta sincronía con la mesa
+    if accion == "FOLD":
+        target_mean = 1.2 if tier in ("BASURA", "C") else 1.6
+        sigma = 0.2
+    elif accion == "CHECK":
+        target_mean = 1.1
+        sigma = 0.2
+    elif accion == "CALL":
+        target_mean = 1.5
+        sigma = 0.25
+    elif accion in ("RAISE", "BET"):
+        target_mean = 1.9
+        sigma = 0.3
+    elif accion in ("ALL_IN", "ALLIN"):
+        target_mean = 2.4
+        sigma = 0.35
+    else:
+        target_mean = 1.4
+        sigma = 0.25
 
     duracion_objetivo = random.gauss(target_mean, sigma)
-    duracion_objetivo = max(2.2, min(8.5, duracion_objetivo))
+    duracion_objetivo = max(0.8, min(3.5, duracion_objetivo))
 
     pausa_adicional = duracion_objetivo - max(0.0, tiempo_ia_seg)
-    pausa_final = max(0.65, pausa_adicional)
+    pausa_final = max(0.3, pausa_adicional)
 
     # Guardia de tiempo restante del timebank de iPoker
     tiempo_mesa_str = str(dom.get("tiempo_restante", "")).strip()
     m_tiempo = re.search(r"(\d+)", tiempo_mesa_str)
     if m_tiempo:
         tiempo_mesa = float(m_tiempo.group(1))
-        if tiempo_mesa > 3.0:
-            pausa_final = min(pausa_final, tiempo_mesa - 2.5)
+        if tiempo_mesa > 2.0:
+            pausa_final = min(pausa_final, tiempo_mesa - 1.0)
 
     pausa_final = round(max(0.1, pausa_final), 2)
-    time.sleep(pausa_final)
-    return pausa_final
+
+    # Dormir en incrementos cortos para mantener sincronía y permitir verificación
+    elapsed = 0.0
+    while elapsed < pausa_final:
+        chunk = min(0.2, pausa_final - elapsed)
+        time.sleep(chunk)
+        elapsed += chunk
+        if hasattr(tracker, "http_turn_signal") and not tracker.http_turn_signal and accion not in ("REPLAY", "START_GAME"):
+            break
+
+    return elapsed
 
 def ejecutar_accion(target, decision, dom_data: Optional[dict] = None, tiempo_ia_seg: float = 0.0) -> str:
     target_url = ""
@@ -2094,6 +2113,8 @@ def decidir_accion_local(dom_data: dict) -> PokerDecision:
     decision_res = decision_maker.decidir_accion_hibrida(
         game_state, historical_actions, opponent_profile, model_mode=tf_mode
     )
+    if 'table_tracker' in globals() and table_tracker is not None:
+        table_tracker.imprimir_estado_mesa(decision_res)
     local_action = decision_res["final_action"]
     latency_ms = round((time.perf_counter_ns() - t0_ns) / 1_000_000.0, 3)
 
@@ -2650,261 +2671,7 @@ def main():
                         pass
 
             def configurar_interceptores(target_page):
-                try:
-                    def on_response(response):
-                        url = response.url
-                        if any(k in url for k in ["poker", "game", "api"]):
-                            if "my_turn.mp3" in url:
-                                print("🔊 [SEÑAL HTTP] ➔ ¡Es nuestro turno! (my_turn.mp3)")
-                                tracker.http_turn_signal = True
-                                tracker.registrar_evento("SONIDO", "Es mi turno (my_turn.mp3)")
-                            elif "card_dealt.mp3" in url:
-                                tracker.registrar_evento("SONIDO", "Cartas repartidas")
-                            elif "my_player_won.mp3" in url:
-                                print("🎉 [SEÑAL HTTP] ➔ ¡Hemos ganado la mano!")
-                                tracker.registrar_evento("SONIDO", "¡Mano Ganada!")
-                                tracker.finalizar_mano_actual("Mano Ganada (Bote cobrado)")
-                            elif "chips_placed.mp3" in url or "action_bet.png" in url:
-                                tracker.registrar_evento("ACCION_MESA", "Apuesta/Fichas colocadas (señal de sonido/timing)")
-                                if (
-                                    len(tracker.active_opponents) <= 2
-                                    and (tracker.opp_id or tracker.opp_nick)
-                                    and (time.time() - tracker.hero_just_acted_ts > 1.2)
-                                    and (time.time() - tracker.ws_action_ts > 1.0)
-                                ):
-                                    profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "BET", calle=tracker.current_street, hand_id=tracker.hand_number)
-                            elif "player_call.mp3" in url or "action_call.png" in url or "chip_call.png" in url:
-                                tracker.registrar_evento("ACCION_MESA", "Call detectado (señal de sonido/timing)")
-                                if (
-                                    len(tracker.active_opponents) <= 2
-                                    and (tracker.opp_id or tracker.opp_nick)
-                                    and (time.time() - tracker.hero_just_acted_ts > 1.2)
-                                    and (time.time() - tracker.ws_action_ts > 1.0)
-                                ):
-                                    profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "CALL", calle=tracker.current_street, hand_id=tracker.hand_number)
-                            elif "player_fold.mp3" in url or "action_fold.png" in url:
-                                tracker.registrar_evento("ACCION_MESA", "Fold detectado (señal de sonido/timing)")
-                                if (
-                                    len(tracker.active_opponents) <= 2
-                                    and (tracker.opp_id or tracker.opp_nick)
-                                    and (time.time() - tracker.hero_just_acted_ts > 1.2)
-                                    and (time.time() - tracker.ws_action_ts > 1.0)
-                                ):
-                                    profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "FOLD", calle=tracker.current_street, hand_id=tracker.hand_number)
-                            elif "player_check.mp3" in url or "action_check.png" in url:
-                                tracker.registrar_evento("ACCION_MESA", "Check detectado (señal de sonido/timing)")
-                                if (
-                                    len(tracker.active_opponents) <= 2
-                                    and (tracker.opp_id or tracker.opp_nick)
-                                    and (time.time() - tracker.hero_just_acted_ts > 1.2)
-                                    and (time.time() - tracker.ws_action_ts > 1.0)
-                                ):
-                                    profiler.registrar_accion_rival(tracker.opp_id, tracker.opp_nick, "CHECK", calle=tracker.current_street, hand_id=tracker.hand_number)
-                            elif "cards-classic-assets" in url and url.endswith(".svg"):
-                                card_name = url.split("/")[-1].replace(".svg", "").upper()
-                                tracker.registrar_evento("CARTA_SVG", f"Carta cargada en mesa: {card_name}")
-
-                    target_page.on("response", on_response)
-
-                    def handle_websocket(ws):
-                        print(f"🔌 [WEBSOCKET CONECTADO] {ws.url}")
-
-                        def convertir_cartas_raw(cards_list: list) -> list:
-                            return [formatear_carta_canonica(c) for c in cards_list if isinstance(c, str) and c != 'X']
-
-                        def procesar_payload_ipoker(payload_str):
-                            try:
-                                if any(k in payload_str for k in ["playerStates", "pots", "cards", "roundNo", "gameCards", "nickname", "playerCode", "isDealer", "winningHand", "classId", "actionCode", "actions"]):
-                                    start_idx = payload_str.find('{')
-                                    end_idx = payload_str.rfind('}')
-                                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                                        json_str = payload_str[start_idx:end_idx+1].replace('\\"', '"')
-                                        data_json = json.loads(json_str)
-
-                                        class_id = data_json.get("classId")
-
-                                        try:
-                                            analytics_logger.registrar_evento_tiempo_real({
-                                                "event_type": f"WS_CLASS_{class_id}" if class_id else "WS_DECODE",
-                                                "street": tracker.current_street,
-                                                "pot_size": float(data_json.get("totalPot", 0.0) or 0.0),
-                                                "current_bet": 0.0,
-                                                "hero_cards": " ".join(tracker.hero_cards),
-                                                "board_cards": " ".join(tracker.community_cards),
-                                                "extra_data": {
-                                                    "classId": class_id,
-                                                    "payload_summary": {k: data_json[k] for k in ("classId", "seatIndex", "actionCode", "actionAmount", "roundNo", "totalPot") if k in data_json}
-                                                }
-                                            })
-                                        except Exception:
-                                            pass
-
-                                        # Decodificar classId 10017 (Turn Notification & Legal Actions)
-                                        if class_id == 10017:
-                                            actions = data_json.get("actions", [])
-                                            seat_idx = data_json.get("seatIndex")
-                                            tracker.http_turn_signal = True
-                                            tracker.registrar_evento("WS_TURNO", f"Turno asiento {seat_idx} ({len(actions)} acciones legales)")
-                                            if 'table_tracker' in globals() and table_tracker is not None:
-                                                table_tracker.actualizar_jugador(seat=seat_idx, is_turn=True)
-
-                                        # Decodificar classId 10029 (Player Action Performed)
-                                        if class_id == 10029:
-                                            seat_idx = data_json.get("seatIndex")
-                                            act_code = data_json.get("actionCode")
-                                            act_amt = float(data_json.get("actionAmount", 0.0))
-                                            chips_left = float(data_json.get("chips", 0.0))
-                                            code_map = {0: "FOLD", 1: "SB_BET", 2: "BB_BET", 3: "CALL", 6: "BET", 7: "ALL_IN", 15: "ANTE", 23: "RAISE"}
-                                            act_str = code_map.get(act_code, f"ACTION_{act_code}")
-                                            tracker.registrar_evento("WS_ACCION_JUGADOR", f"Asiento {seat_idx} -> {act_str} ({act_amt}) | Fichas: {chips_left}")
-                                            if 'table_tracker' in globals() and table_tracker is not None:
-                                                is_fold = (act_code == 0)
-                                                status = "FOLD" if is_fold else "ACTIVO"
-                                                table_tracker.actualizar_jugador(player_id=f"Seat_{seat_idx}", seat=seat_idx, bet=act_amt, stack=chips_left, status=status)
-                                                if getattr(table_tracker, "hero_seat", None) == seat_idx:
-                                                    if act_code == 1:
-                                                        tracker.position_name = "SB"
-                                                        tracker.is_dealer = False
-                                                    elif act_code == 2:
-                                                        tracker.position_name = "BB"
-                                                        tracker.is_dealer = False
-
-                                        if "nickname" in data_json:
-                                            tracker.opp_nick = data_json["nickname"]
-                                        if "playerCode" in data_json:
-                                            tracker.opp_id = str(data_json["playerCode"])
-
-                                        if "roundNo" in data_json:
-                                            ronda = int(data_json["roundNo"] or 1)
-                                            calle_nueva = "PREFLOP" if ronda <= 1 else "POSTFLOP"
-                                            if ronda == 1:
-                                                tracker.community_cards.clear()
-                                                if tracker.current_street == "POSTFLOP" or len(tracker.current_hand_history) > 3:
-                                                    prev_hand_id = tracker.hand_number
-                                                    rivales_previos = list(tracker.active_opponents.items()) or ([(tracker.opp_id, tracker.opp_nick)] if (tracker.opp_id or tracker.opp_nick) else [])
-                                                    tracker.finalizar_mano_actual("Fin de mano previa")
-                                                    for r_id, r_nick in rivales_previos:
-                                                        profiler.incrementar_manos_rival(r_id, r_nick, hand_id=prev_hand_id)
-                                            if ronda != tracker.current_round_no:
-                                                for st in tracker.prev_player_states.values():
-                                                    st["bet"] = 0.0
-                                            tracker.current_round_no = ronda
-                                            tracker.current_street = calle_nueva
-                                            print(f"🔄 [iPoker WS DECODER] ➔ Ronda #{ronda} ({tracker.current_street})")
-                                            tracker.registrar_evento("WS_RONDA", f"Calle/Ronda #{ronda} ({tracker.current_street})")
-
-                                        if "gameCards" in data_json and isinstance(data_json["gameCards"], list):
-                                            comm = [formatear_carta_canonica(c) for c in data_json["gameCards"] if isinstance(c, str) and c != 'X']
-                                            if comm and tracker.current_round_no in (2, 3, 4):
-                                                tracker.community_cards = comm
-
-                                        if "cards" in data_json and isinstance(data_json["cards"], list):
-                                            comm = [formatear_carta_canonica(c) for c in data_json["cards"] if isinstance(c, str) and c != 'X']
-                                            if comm and tracker.current_round_no in (2, 3, 4):
-                                                for c in comm:
-                                                    if c not in tracker.community_cards and len(tracker.community_cards) < 5:
-                                                        tracker.community_cards.append(c)
-                                                print(f"🃏 [iPoker WS DECODER] ➔ Mesa Comunitaria: {tracker.community_cards}")
-
-                                        if "playerStates" in data_json:
-                                            if 'table_tracker' in globals() and table_tracker is not None:
-                                                table_tracker.actualizar_desde_ws_player_states(data_json["playerStates"])
-                                            procesar_delta_player_states(
-                                                data_json,
-                                                tracker,
-                                                profiler,
-                                                hero_nick=getattr(config, "HERO_NICKNAME", ""),
-                                            )
-                                            dealer_idx = next((i for i, p in enumerate(data_json["playerStates"]) if p.get("isDealer")), None)
-                                            hero_idx = next(
-                                                (
-                                                    i for i, p in enumerate(data_json["playerStates"])
-                                                    if ("cards" in p and any(c != 'X' for c in p.get('cards', [])))
-                                                    or (getattr(config, "HERO_NICKNAME", "") and str(p.get("playerName") or p.get("nickname") or "").strip().lower() == str(getattr(config, "HERO_NICKNAME", "")).strip().lower())
-                                                ),
-                                                None,
-                                            )
-                                            if dealer_idx is not None and hero_idx is not None:
-                                                n_seats = max(2, len(data_json["playerStates"]))
-                                                rel = (hero_idx - dealer_idx) % n_seats
-                                                if rel == 0:
-                                                    tracker.is_dealer = True
-                                                    tracker.position_name = "BTN"
-                                                elif n_seats == 2:
-                                                    tracker.is_dealer = False
-                                                    tracker.position_name = "BB"
-                                                elif rel == 1:
-                                                    tracker.is_dealer = False
-                                                    tracker.position_name = "SB"
-                                                else:
-                                                    tracker.is_dealer = False
-                                                    tracker.position_name = "BB"
-                                            for ps in data_json["playerStates"]:
-                                                if "isDealer" in ps and ps["isDealer"]:
-                                                    if "cards" in ps and any(c != 'X' for c in ps.get('cards', [])):
-                                                        tracker.is_dealer = True
-                                                        tracker.position_name = "BTN"
-                                                        tracker.registrar_evento("WS_POSICION", "Hero es DEALER (Ventaja Posicional)")
-
-                                                if "cards" in ps and isinstance(ps["cards"], list):
-                                                    cards_raw = [c for c in ps["cards"] if isinstance(c, str) and c != 'X']
-                                                    cards_list = [formatear_carta_canonica(c) for c in cards_raw]
-                                                    # Solo guardar como nuestras cartas privadas la primera vez que recibimos 2 cartas en Preflop
-                                                    if len(cards_list) == 2 and len(ps["cards"]) == 2 and tracker.current_street == "PREFLOP":
-                                                        if not tracker.my_cards:
-                                                            tracker.my_cards = cards_list
-                                                            print(f"🎴 [iPoker WS DECODER] ➔ Mis Cartas: {cards_list}")
-                                                            tracker.registrar_evento("WS_CARTAS", f"Mis cartas: {cards_list}")
-                                                        elif cards_list != tracker.my_cards:
-                                                            print(f"👀 [ALL-IN SHOWDOWN WS] ➔ Cartas Rival Reveladas: {cards_list}")
-                                                            tracker.registrar_evento("SHOWDOWN_RIVAL", f"Rival muestra: {cards_list}")
-                                                            if tracker.opp_id or tracker.opp_nick:
-                                                                profiler.registrar_showdown(tracker.opp_id, tracker.opp_nick, " ".join(cards_list))
-                                                                if analytics_logger is not None:
-                                                                    try:
-                                                                        perfil_est = profiler.obtener_perfil_explotativo(tracker.opp_id, tracker.opp_nick)
-                                                                        analytics_logger.registrar_verificacion_showdown(tracker.opp_id, tracker.opp_nick, " ".join(cards_list), perfil_est)
-                                                                    except Exception:
-                                                                        pass
-                                                    elif cards_list and tracker.current_round_no in (2, 3, 4) and len(ps["cards"]) in (1, 3) and "playerCode" not in ps:
-                                                        for c in cards_list:
-                                                            if c not in tracker.community_cards and len(tracker.community_cards) < 5:
-                                                                tracker.community_cards.append(c)
-
-                                        if "pots" in data_json:
-                                            raw_pots = data_json["pots"]
-                                            if isinstance(raw_pots, list):
-                                                pot_sum = int(sum(float(p.get("sum", 0)) for p in raw_pots if isinstance(p, dict)))
-                                            else:
-                                                pot_sum = raw_pots
-                                            tracker.last_pot = pot_sum
-                                            print(f"💰 [iPoker WS DECODER] ➔ Bote Actualizado: {pot_sum}")
-                                            tracker.registrar_evento("WS_BOTE", f"Bote: {pot_sum}")
-                                        if "winningHand" in data_json or "showdown" in data_json:
-                                            print(f"🃏 [SHOWDOWN WS] Cartas mostradas al final: {data_json}")
-                                            tracker.registrar_evento("SHOWDOWN", f"Cartas reveladas: {data_json}")
-                                            if tracker.opp_id or tracker.opp_nick:
-                                                cartas_sd = data_json.get("winningHand") or data_json.get("showdown")
-                                                profiler.registrar_showdown(tracker.opp_id, tracker.opp_nick, str(cartas_sd))
-                            except Exception:
-                                pass
-
-                        def handle_recv(payload):
-                            try:
-                                p_str = payload.decode('utf-8', errors='ignore') if isinstance(payload, bytes) else str(payload)
-                                procesar_payload_ipoker(p_str)
-                            except Exception:
-                                pass
-
-                        def handle_sent(payload):
-                            pass
-
-                        ws.on("framereceived", handle_recv)
-                        ws.on("framesent", handle_sent)
-
-                    target_page.on("websocket", handle_websocket)
-                except Exception:
-                    pass
+                configurar_ws_interceptores(target_page, tracker, profiler, analytics_logger, table_tracker=table_tracker)
 
             page = context.pages[0] if context.pages else context.new_page()
             configurar_interceptores(page)
@@ -2914,7 +2681,7 @@ def main():
                     new_page.wait_for_load_state("domcontentloaded", timeout=5000)
                 except Exception:
                     pass
-                configurar_interceptores(new_page)
+                configurar_ws_interceptores(new_page, tracker, profiler, analytics_logger, table_tracker=table_tracker)
 
             context.on("page", on_new_page)
             print("🕵️ Interceptor de WebSockets, Red y Sonidos activado globalmente.")
@@ -2968,6 +2735,7 @@ def main():
                         dom_data = target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or {}
                         if dom_data and 'table_tracker' in globals() and table_tracker is not None:
                             table_tracker.actualizar_desde_dom(dom_data)
+                            table_tracker.imprimir_estado_mesa()
 
                         # Si llegó la señal de audio my_turn.mp3 pero los botones del DOM aún están renderizándose, esperar hasta 450ms
                         if tracker.http_turn_signal and not dom_data.get('botones_visibles'):
@@ -3107,7 +2875,11 @@ def main():
                             stack_ef_bb = float((dom_data.get("gto_math") or {}).get("stack_efectivo_bb") or 0.0)
                             modo_activo = config.obtener_modo_activo() if hasattr(config, "obtener_modo_activo") else str(getattr(config, "MODO", "gemini")).lower()
 
-                            if not comunitarias and 0 < stack_ef_bb <= float(getattr(config, "PUSH_FOLD_MAX_BB", 10.0)):
+                            if modo_activo == "local":
+                                print("🌳 [MODO LOCAL HÍBRIDO] Decidiendo con Motor Estratégico + Opponent Model (Sin LLM)...")
+                                decision = decidir_accion_local(dom_data)
+                                decision_source = "local_hybrid"
+                            elif not comunitarias and 0 < stack_ef_bb <= float(getattr(config, "PUSH_FOLD_MAX_BB", 10.0)):
                                 print(f"⚡ [Nash Push/Fold <= {config.PUSH_FOLD_MAX_BB:.0f}BB] Decisión directa sin LLM ({stack_ef_bb:.1f} BB)...")
                                 decision = decidir_accion_rapida(dom_data)
                                 decision_source = "nash_push_fold"
@@ -3115,10 +2887,6 @@ def main():
                                 print("🛡️ [MODO DETERMINISTA] Decidiendo con motor GTO sin invocar LLM...")
                                 decision = decidir_accion_rapida(dom_data)
                                 decision_source = "gto_determinista"
-                            elif modo_activo == "local":
-                                print("🌳 [MODO LOCAL HÍBRIDO] Decidiendo con Motor Estratégico + Random Forest Opponent Model...")
-                                decision = decidir_accion_local(dom_data)
-                                decision_source = "local_hybrid"
                             elif modo_activo == "hibrido":
                                 print("⚖️ [MODO HÍBRIDO] Evaluando motor GTO + EV y consultando LLM...")
                                 motor_dec = decidir_accion_rapida(dom_data)

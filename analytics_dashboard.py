@@ -1492,8 +1492,10 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
                     </div>
                     <div class="hud-box">
                         <div class="lbl">5. Exploitability Árbol Completo</div>
-                        <div class="val" style="font-size:0.82rem; color:#fbbf24;">NO DISPONIBLE SIN SOLVER CFR</div>
-                        <div class="ref">No se inventan cifras CFR postflop</div>
+                        <div class="val" style="font-size:0.82rem; color:${{expl.deep_cfr_status === 'DEEP_CFR_KERA_ACTIVO' ? '#38bdf8' : '#fbbf24'}};">
+                            ${{expl.deep_cfr_status === 'DEEP_CFR_KERA_ACTIVO' ? 'DEEP CFR (MODELO LOCAL KERA)' : 'NO DISPONIBLE SIN SOLVER CFR'}}
+                        </div>
+                        <div class="ref">${{expl.deep_cfr_status === 'DEEP_CFR_KERA_ACTIVO' ? 'Aproximación por Deep CFR Advantage Net' : 'No se inventan cifras CFR postflop'}}</div>
                     </div>
                     <div class="hud-box">
                         <div class="lbl">6. Subjuego Push/Fold (≤10 BB)</div>
@@ -2467,7 +2469,12 @@ def _obtener_datos_live_para_dashboard(db_path: Path) -> Dict[str, Any]:
         }
 
     try:
-        historical = OpponentProfiler(db_path=db_path).listar_perfiles_historicos(limit=100)
+        prof = OpponentProfiler(db_path=db_path)
+        try:
+            historical = prof.listar_perfiles_historicos(limit=100)
+        finally:
+            prof.close()
+            prof.dispose()
     except Exception:
         historical = []
     return {"live_status": live_status, "historical_profiles": historical}

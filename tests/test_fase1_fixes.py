@@ -221,25 +221,31 @@ class TestFase1Fixes(unittest.TestCase):
         self.assertEqual(dec.accion, "CHECK")
 
     def test_06_play_money_only_blocks_real_money_tables(self):
-        self.assertTrue(config.PLAY_MONEY_ONLY)
-        self.assertTrue(es_mesa_dinero_real({"bote": "€12.50", "mi_stack": "€50"}))
-        self.assertTrue(es_mesa_dinero_real({"bote": "$100 USD"}))
-        self.assertFalse(es_mesa_dinero_real({"bote": "120", "mi_stack": "1,500"}))
+        orig_pmo = getattr(config, "PLAY_MONEY_ONLY", True)
+        config.PLAY_MONEY_ONLY = True
+        try:
+            self.assertTrue(config.PLAY_MONEY_ONLY)
+            self.assertTrue(es_mesa_dinero_real({"bote": "€12.50", "mi_stack": "€50"}))
+            self.assertTrue(es_mesa_dinero_real({"bote": "$100 USD"}))
+            self.assertFalse(es_mesa_dinero_real({"bote": "120", "mi_stack": "1,500"}))
 
-        target = MagicMock()
-        target.url = "https://games.codere.mx/real-money/table"
-        dec = PokerDecision(
-            evaluacion="Test",
-            estrategia_competitiva="Test",
-            estado_pantalla="EN_MESA_JUEGO",
-            es_mi_turno=True,
-            accion="RAISE",
-            monto_apuesta=40,
-            confianza=0.9,
-        )
-        res = ejecutar_accion(target, dec, dom_data={"bote": "$100", "botones_visibles": "FOLD | CALL | RAISE"})
-        self.assertEqual(res, "WAIT")
-        target.locator.assert_not_called()
+            target = MagicMock()
+            target.url = "https://games.codere.mx/real-money/table"
+
+            dec = PokerDecision(
+                evaluacion="Test",
+                estrategia_competitiva="Test",
+                estado_pantalla="EN_MESA_JUEGO",
+                es_mi_turno=True,
+                accion="RAISE",
+                monto_apuesta=40,
+                confianza=0.9,
+            )
+            res = ejecutar_accion(target, dec, dom_data={"bote": "$100", "botones_visibles": "FOLD | CALL | RAISE"})
+            self.assertEqual(res, "WAIT")
+            target.locator.assert_not_called()
+        finally:
+            config.PLAY_MONEY_ONLY = orig_pmo
 
     def test_07_selectors_not_fragile(self):
         self.assertNotIn("div:has-text('All-in')", config.SELECTORS["allin"])

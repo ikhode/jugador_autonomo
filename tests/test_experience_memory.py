@@ -105,25 +105,27 @@ class TestExperienceMemoryProduction(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             legacy_db = Path(tmp) / "legacy_mem.db"
             conn = sqlite3.connect(legacy_db)
-            conn.execute("""
-                CREATE TABLE errores_experiencia (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT,
-                    hand_tier TEXT,
-                    board_texture TEXT,
-                    opp_archetype TEXT,
-                    action_taken TEXT,
-                    loss_amount INTEGER,
-                    lesson_learned TEXT,
-                    similarity_key TEXT
+            try:
+                conn.execute("""
+                    CREATE TABLE errores_experiencia (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT,
+                        hand_tier TEXT,
+                        board_texture TEXT,
+                        opp_archetype TEXT,
+                        action_taken TEXT,
+                        loss_amount INTEGER,
+                        lesson_learned TEXT,
+                        similarity_key TEXT
+                    )
+                """)
+                conn.execute(
+                    "INSERT INTO errores_experiencia (timestamp, hand_tier, board_texture, opp_archetype, action_taken, loss_amount, lesson_learned, similarity_key) "
+                    "VALUES ('2026-11-15 00:00:00', 'B', 'MESA SECA', 'Nit', 'CALL', 80, 'Lección legacy', 'B|SECA|NIT')"
                 )
-            """)
-            conn.execute(
-                "INSERT INTO errores_experiencia (timestamp, hand_tier, board_texture, opp_archetype, action_taken, loss_amount, lesson_learned, similarity_key) "
-                "VALUES ('2026-11-15 00:00:00', 'B', 'MESA SECA', 'Nit', 'CALL', 80, 'Lección legacy', 'B|SECA|NIT')"
-            )
-            conn.commit()
-            conn.close()
+                conn.commit()
+            finally:
+                conn.close()
 
             mem = PokerExperienceMemory(db_path=legacy_db)
             hits = mem.buscar_errores_similares("B", "MESA SECA", "Nit")
