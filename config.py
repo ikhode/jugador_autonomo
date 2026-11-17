@@ -76,19 +76,11 @@ PLAY_MONEY_ONLY = os.getenv("PLAY_MONEY_ONLY", "true").lower() == "true"
 CDP_PORT = int(os.getenv("CDP_PORT", "9222"))
 SLOW_MO = int(os.getenv("SLOW_MO", "100"))
 
-# Humanización y Pacing de Acciones (World-Class Human Timing Engine)
-HUMAN_TIMING_ENABLED = os.getenv("HUMAN_TIMING_ENABLED", "true").lower() == "true"
-HUMAN_MIN_DELAY_SEC = float(os.getenv("HUMAN_MIN_DELAY_SEC", "1.5"))
-HUMAN_MAX_DELAY_SEC = float(os.getenv("HUMAN_MAX_DELAY_SEC", "8.5"))
-HUMAN_PRE_CLICK_PAUSE_MS = int(os.getenv("HUMAN_PRE_CLICK_PAUSE_MS", "220"))
-HUMAN_CLICK_DURATION_MS = int(os.getenv("HUMAN_CLICK_DURATION_MS", "85"))
-
 USER_DATA_DIR = Path("browser_profile")
 
 # Configuración de Modalidad y Mesa para Live HUD Multijugador
 POKER_MODE = os.getenv("POKER_MODE", "Cash Game Texas Hold'em")
 MAX_TABLE_SEATS = int(os.getenv("MAX_TABLE_SEATS", "6"))
-MAX_SEATS = MAX_TABLE_SEATS
 HERO_NICKNAME = os.getenv("HERO_NICKNAME", GAME_USER)
 
 # Configuración del Sistema de Analíticas y Versionado Experimental
@@ -116,8 +108,8 @@ SELECTORS = {
     "login_submit": "button.iniciar, button[type='submit'], button.submit-login",
     "poker_nav_link": "a[href*='poker'], button:has-text('Poker')",
     "btn_open_poker": "#pokerPageOpen, button:has-text('Abrir Poker'), .open-poker-btn",
-    "select_game_card": ".game-category-tile:has-text(\"Texas Hold'em\"), div.game-category-tile:has-text(\"Hold'em\"), div:has-text(\"Texas Hold'em\"), [data-game*='holdem'], .cash-game, .game-category-tile.cash-game, [data-game*='cash']",
-    "start_match_btn": ".filter-play-button, button:has-text('Jugar Poker'), button:has-text('Jugar'), button:has-text('Play'), .play-btn, button:has-text('Unirse'), button:has-text('Sentarse'), button:has-text('Entrar'), .table-row, [data-action*='join'], [data-action*='play']",
+    "select_game_card": ".game-category-tile.cash-game, .cash-game, xpath=//*[@id=\"Poker\"]/div/div[1]/div[2]/div[1]/div[1]/div/div[1]/div/div[3]/div[2]/div[2], .classic-twister, .twister-game-card, .game-card, [data-game*='cash'], [data-game*='twister']",
+    "start_match_btn": ".filter-play-button, button:has-text('Jugar Poker'), button:has-text('Jugar'), button:has-text('Play'), .play-btn",
 
     # Mesa de juego (nombres estándar y alias con prefijo btn_)
     "actions_area": ".actions-area, .player-actions",

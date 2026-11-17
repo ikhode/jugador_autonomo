@@ -674,7 +674,6 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             const isFold = cls.includes('fold') || txtArea.includes('fold') || txtArea.includes('retir');
             const isEmpty = txtArea.includes('vacío') || txtArea.includes('empty');
             const estado = isEmpty ? 'VACIO' : (isFold ? 'FOLD' : 'ACTIVO');
-
             // Dealer button activo si .game-position no tiene .pt-visibility-hidden
             const posContainer = area.querySelector('.game-position:not(.pt-visibility-hidden)');
             const isDealer = !!posContainer && !!posContainer.querySelector('.dealer');
@@ -715,7 +714,7 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
         if (document.body && (document.body.textContent.includes('podrías hacer check sin coste alguno') || document.body.textContent.includes('¿Seguro que quieres foldear?'))) {
             modales.push('PopupCheckGratis');
         }
-        const textosModal = ['Jugar de nuevo', 'Replay', 'Volver a jugar', 'Aceptar', 'Jugar Poker', 'Comprar', 'Entrar', 'Unirse', 'Confirmar'];
+        const textosModal = ['Jugar de nuevo', 'Replay', 'Volver a jugar', 'Aceptar', 'Jugar Poker'];
         for (const t of textosModal) {
             const encontrado = Array.from(document.querySelectorAll('button, a, div, span')).find(
                 el => (el.offsetWidth > 0 || el.offsetHeight > 0) && (el.innerText || el.textContent || '').trim() === t
@@ -725,15 +724,17 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             if (encontrado && !modales.includes(t)) modales.push(t);
         }
 
-        // Detectar si hemos sido eliminados o la mesa quedó vacía ("Vacío" en nuestro asiento inferior)
+        // Detectar si hemos sido eliminados o la mesa quedó vacía ("Vacío" en nuestro asiento inferior o >=2 asientos vacíos)
         const textoBody = document.body ? (document.body.innerText || '') : '';
+        const vecesVacio = (textoBody.match(/Vacío|Empty/g) || []).length;
         const heroAsientoVacio = Array.from(document.querySelectorAll('div, span')).some(el => {
             const t = (el.innerText || '').trim();
             if (t !== 'Vacío' && t !== 'Empty') return false;
             const r = el.getBoundingClientRect();
             return r.width > 10 && r.height > 10 && r.top > 380 && r.left > 350 && r.left < 930;
         });
-        if (!esMiTurno && misCartas.length === 0 && heroAsientoVacio) {
+        const hayGanador1500 = stackRival.includes('1,500') || stackRival.includes('1500') || textoBody.includes('1,500');
+        if (!esMiTurno && misCartas.length === 0 && (heroAsientoVacio || vecesVacio >= 2 || (vecesVacio >= 1 && hayGanador1500))) {
             modales.push('MesaFinalizadaVacia');
         }
 
@@ -742,33 +743,12 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
         if (esDealerHero) {
             posDom = 'BTN';
         } else {
-            const dealerIdx = jugadoresMesa.findIndex(j => j.is_dealer);
-            const heroIdx = jugadoresMesa.findIndex(j => j.is_hero);
-            const numJugadores = jugadoresMesa.length;
-            if (dealerIdx !== -1 && heroIdx !== -1 && numJugadores >= 2) {
-                const dist = (heroIdx - dealerIdx + numJugadores) % numJugadores;
-                if (dist === 0) posDom = 'BTN';
-                else if (dist === 1) posDom = 'SB';
-                else if (dist === 2) posDom = 'BB';
-                else if (numJugadores === 6) {
-                    if (dist === 3) posDom = 'UTG';
-                    else if (dist === 4) posDom = 'MP';
-                    else if (dist === 5) posDom = 'CO';
-                } else if (numJugadores === 5) {
-                    if (dist === 3) posDom = 'UTG';
-                    else if (dist === 4) posDom = 'CO';
-                } else if (numJugadores === 4) {
-                    if (dist === 3) posDom = 'CO';
-                }
-            }
-            if (!posDom) {
-                const ciegaHero = parseFloat((apuestasRivales['hero'] || '0').replace(/[^\d.]/g, '')) || 0;
-                const bbNum = parseFloat(bigBlindDom.replace(/[^\d.]/g, '')) || 20;
-                if (ciegaHero > 0 && ciegaHero <= 0.6 * bbNum) {
-                    posDom = 'SB';
-                } else if (ciegaHero >= 0.8 * bbNum) {
-                    posDom = 'BB';
-                }
+            const ciegaHero = parseFloat((apuestasRivales['hero'] || '0').replace(/[^\d.]/g, '')) || 0;
+            const bbNum = parseFloat(bigBlindDom.replace(/[^\d.]/g, '')) || 20;
+            if (ciegaHero > 0 && ciegaHero <= 0.6 * bbNum) {
+                posDom = 'SB';
+            } else if (ciegaHero >= 0.8 * bbNum) {
+                posDom = 'BB';
             }
         }
 
@@ -802,47 +782,15 @@ def esperar_carga_dom(target, timeout_ms: int = 5000):
     except Exception:
         pass
 
-def aplicar_pausa_pre_clic(elem=None, descripcion: str = "") -> float:
-    """
-    Simula la micro-pausa neuromuscular y el movimiento/hover previo al clic
-    de un jugador humano real (World-Class Pre-Click Timing).
-    Introduce una pausa realista (120ms - 280ms) y hace hover sobre el elemento.
-    """
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        return 0.0
-    if not getattr(config, "HUMAN_TIMING_ENABLED", True):
-        return 0.0
-
-    base_ms = int(getattr(config, "HUMAN_PRE_CLICK_PAUSE_MS", 220))
-    # Variación gaussiana suave para evitar patrones mecánicos predecibles
-    pre_ms = max(80, min(450, int(random.gauss(base_ms, 35))))
-    delay_sec = round(pre_ms / 1000.0, 3)
-
-    if elem is not None:
-        try:
-            elem.hover(timeout=250)
-        except Exception:
-            pass
-
-    time.sleep(delay_sec)
-    return delay_sec
-
-
 def intentar_click(target, selector: str, descripcion: str, timeout: int = 4000) -> bool:
     selectores = [s.strip() for s in selector.split(",") if s.strip()]
-    is_test = bool(os.environ.get("PYTEST_CURRENT_TEST"))
-    click_dur = 0 if is_test else int(getattr(config, "HUMAN_CLICK_DURATION_MS", 85))
-    if click_dur > 0:
-        click_dur = max(45, min(160, int(random.gauss(click_dur, 15))))
-
     # Paso rápido (0ms): verificar si alguno de los selectores ya es visible ahora mismo
     for sel in selectores:
         try:
             elem = target.locator(sel).first
             if elem.is_visible():
                 elem.wait_for(state="visible", timeout=500)
-                aplicar_pausa_pre_clic(elem, descripcion)
-                elem.click(timeout=1200, delay=click_dur)
+                elem.click(timeout=1200)
                 print(f"✅ [CLIC OK] Clic en {descripcion} realizado.")
                 return True
         except Exception:
@@ -859,33 +807,26 @@ def intentar_click(target, selector: str, descripcion: str, timeout: int = 4000)
             try:
                 elem = target.locator(sel).first
                 if elem.is_visible():
-                    aplicar_pausa_pre_clic(elem, descripcion)
-                    elem.click(timeout=1200, delay=click_dur)
+                    elem.click(timeout=1200)
                     print(f"✅ [CLIC OK] Clic en {descripcion} realizado.")
                     return True
             except Exception:
                 pass
 
             if not sel.startswith("xpath=") and ":has-text(" not in sel:
-                aplicar_pausa_pre_clic(None, descripcion)
-                clicked = target.evaluate("""({selector, clickDur}) => {
+                clicked = target.evaluate("""(selector) => {
                     try {
                         const el = document.querySelector(selector);
                         if (el && !el.disabled && el.getAttribute('aria-disabled') !== 'true') {
                             el.scrollIntoView({ block: 'center' });
-                            el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
                             el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                            if (clickDur > 0) {
-                                const start = performance.now();
-                                while (performance.now() - start < clickDur) {}
-                            }
                             el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
                             el.click();
                             return true;
                         }
                     } catch (e) {}
                     return false;
-                }""", {"selector": sel, "clickDur": click_dur})
+                }""", sel)
 
                 if clicked:
                     print(f"⚡ [JS CLICK OK] Clic por evento JS realizado en {descripcion}.")
@@ -1301,29 +1242,9 @@ def actualizar_dom_data_conservando_contexto(
         posicion = str(dom_data.get("posicion") or "DESCONOCIDA").upper()
 
     if not posicion or posicion == "DESCONOCIDA":
-        jugadores = [j for j in dom_data.get("jugadores_mesa", []) if isinstance(j, dict) and j.get("estado") != "VACIO"]
-        dealer_idx = next((i for i, j in enumerate(jugadores) if j.get("is_dealer")), -1)
-        hero_idx = next((i for i, j in enumerate(jugadores) if j.get("is_hero")), -1)
-        k = len(jugadores)
-        if dealer_idx != -1 and hero_idx != -1 and k >= 2:
-            dist = (hero_idx - dealer_idx + k) % k
-            if dist == 0:
-                posicion = "BTN"
-            elif dist == 1:
-                posicion = "SB"
-            elif dist == 2:
-                posicion = "BB"
-            elif k == 6:
-                posicion = {3: "UTG", 4: "MP", 5: "CO"}.get(dist, "MP")
-            elif k == 5:
-                posicion = {3: "UTG", 4: "CO"}.get(dist, "CO")
-            elif k == 4:
-                posicion = "CO"
-
-    if not posicion or posicion == "DESCONOCIDA":
         if getattr(tracker_obj, "is_dealer", False) or dom_data.get("posicion") == "BTN":
             posicion = "BTN"
-        elif dom_data.get("posicion") in ("SB", "BB", "UTG", "MP", "CO"):
+        elif dom_data.get("posicion") in ("SB", "BB"):
             posicion = dom_data.get("posicion")
         else:
             bb = _parse_num_dom(dom_data.get("big_blind"), float(getattr(config, "BIG_BLIND_DEFAULT", 20.0))) or 20.0
@@ -1335,8 +1256,7 @@ def actualizar_dom_data_conservando_contexto(
             elif not comunitarias and (abs(a_ig - 0.5 * bb) < 0.2 * bb or abs(a_ig - 1.5 * bb) < 0.2 * bb):
                 posicion = "SB"
             elif not comunitarias and bote_f <= 1.6 * bb and abs(a_ig - bb) < 0.2 * bb:
-                num_jug = len(dom_data.get("jugadores_mesa", []))
-                posicion = "UTG" if num_jug >= 4 else "BTN"
+                posicion = "BTN"
             elif not comunitarias and abs(a_ig - bb) < 0.2 * bb and bote_f >= 2.0 * bb:
                 posicion = "BB"
             elif getattr(tracker_obj, "is_dealer", False):
@@ -1531,7 +1451,7 @@ def navegar_al_juego(page):
             print("✨ ¡Mesa o turno detectado tras abrir Poker! Cancelando clics del lobby.")
             return page
 
-        print("🎰 Paso 3: Buscando y seleccionando la categoría Texas Hold'em...")
+        print("🎰 Paso 3: Esperando a que la interfaz cargue el contenedor de partidas...")
         try:
             page.wait_for_selector(".home-game-categories-widget, .game-categories-widget-wrapper", state="visible", timeout=8000)
         except Exception:
@@ -1542,23 +1462,17 @@ def navegar_al_juego(page):
 
         while intentos_cash < 10 and not cash_game_encontrado:
             if es_mesa_activa_o_turno(page):
-                print("⚡ ¡Turno activo de juego detectado! Cancelando espera de Texas Hold'em e ingresando a la mesa...")
+                print("⚡ ¡Turno activo de juego detectado! Cancelando espera de Cash Game e ingresando a la mesa...")
                 return page
 
             intentos_cash += 1
-            if intentar_click(page, config.SELECTORS["select_game_card"], "Categoría Texas Hold'em", timeout=1500):
-                cash_game_encontrado = True
-                break
-            if clicar_texto_modal_universal(page, ["Texas Hold'em", "Texas Holdem", "Hold'em"], "Tarjeta Texas Hold'em"):
+            if intentar_click(page, config.SELECTORS["select_game_card"], "Categoría Cash Game (.game-category-tile.cash-game)", timeout=1500):
                 cash_game_encontrado = True
                 break
 
             for frame in page.frames:
                 try:
-                    if intentar_click(frame, config.SELECTORS["select_game_card"], "Categoría Texas Hold'em (iFrame)", timeout=0):
-                        cash_game_encontrado = True
-                        break
-                    if clicar_texto_modal_universal(frame, ["Texas Hold'em", "Texas Holdem", "Hold'em"], "Tarjeta Texas Hold'em (iFrame)"):
+                    if intentar_click(frame, config.SELECTORS["select_game_card"], "Categoría Cash Game (iFrame)", timeout=0):
                         cash_game_encontrado = True
                         break
                 except Exception:
@@ -1571,12 +1485,12 @@ def navegar_al_juego(page):
             return page
 
         if cash_game_encontrado:
-            print("✅ Categoría Texas Hold'em seleccionada con éxito.")
+            print("✅ Categoría Cash Game (Texas Hold'em) seleccionada con éxito.")
             esperar_carga_dom(page)
         else:
-            print("⚠️ Texas Hold'em no encontrado tras reintentos. Verificando si el botón de juego está visible directamente...")
+            print("⚠️ Cash Game no encontrado tras reintentos. Verificando si el botón de juego está visible directamente...")
             if intentar_click(page, config.SELECTORS["start_match_btn"], "Botón Jugar Poker (Directo)", timeout=3000):
-                print("✨ ¡Botón Jugar Poker encontrado directamente sin pasar por Texas Hold'em!")
+                print("✨ ¡Botón Jugar Poker encontrado directamente sin pasar por Cash Game!")
                 esperar_carga_dom(page)
                 return page
 
@@ -1714,13 +1628,7 @@ def clicar_texto_modal_universal(target, textos: list[str], descripcion: str = "
     y dispara eventos reales de ratón + click(). Funciona aunque el botón en iPoker sea un <div> o <span>.
     """
     try:
-        aplicar_pausa_pre_clic(None, descripcion)
-        is_test = bool(os.environ.get("PYTEST_CURRENT_TEST"))
-        click_dur = 0 if is_test else int(getattr(config, "HUMAN_CLICK_DURATION_MS", 85))
-        if click_dur > 0:
-            click_dur = max(45, min(160, int(random.gauss(click_dur, 15))))
-
-        clicado = target.evaluate("""({textos, solo_modal, clickDur}) => {
+        clicado = target.evaluate("""({textos, solo_modal}) => {
             if (!document.body) return false;
             const elementos = Array.from(document.querySelectorAll('button, div, span, a, [role="button"]'));
             // Preferir coincidencia exacta en el nodo más interno visible
@@ -1733,12 +1641,7 @@ def clicar_texto_modal_universal(target, textos: list[str], descripcion: str = "
                 });
                 if (exactos.length > 0) {
                     const btn = exactos[exactos.length - 1];
-                    btn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
                     btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                    if (clickDur > 0) {
-                        const start = performance.now();
-                        while (performance.now() - start < clickDur) {}
-                    }
                     btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
                     btn.click();
                     return true;
@@ -1755,19 +1658,14 @@ def clicar_texto_modal_universal(target, textos: list[str], descripcion: str = "
                 if (parciales.length > 0) {
                     // Seleccionar el nodo más interno/específico que contiene el texto
                     const btn = parciales.sort((a, b) => (a.clientWidth * a.clientHeight) - (b.clientWidth * b.clientHeight))[0];
-                    btn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
                     btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                    if (clickDur > 0) {
-                        const start = performance.now();
-                        while (performance.now() - start < clickDur) {}
-                    }
                     btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
                     btn.click();
                     return true;
                 }
             }
             return false;
-        }""", {"textos": textos, "solo_modal": solo_modal, "clickDur": click_dur})
+        }""", {"textos": textos, "solo_modal": solo_modal})
         if clicado:
             print(f"✅ [CLIC DE TEXTO OK] Clic realizado en '{descripcion}'.")
             return True
@@ -1821,14 +1719,12 @@ def salir_de_mesa_vacia_o_finalizada(target_mesa, page, context) -> bool:
 
         time.sleep(1.2)
 
-        # Verificar si apareció la tarjeta Texas Hold'em o el botón Jugar Poker tras pulsar '+'
-        if intentar_click(target_mesa, config.SELECTORS["select_game_card"], "Categoría Texas Hold'em (tras salir de mesa)", timeout=1200):
-            time.sleep(0.6)
-        if clicar_texto_modal_universal(target_mesa, ["Texas Hold'em", "Texas Holdem", "Hold'em"], "Tarjeta Texas Hold'em"):
+        # Verificar si apareció la tarjeta Cash Game o el botón Jugar Poker tras pulsar '+'
+        if intentar_click(target_mesa, config.SELECTORS["select_game_card"], "Categoría Cash Game (tras salir de mesa)", timeout=1200):
             time.sleep(0.6)
         if intentar_click(target_mesa, config.SELECTORS["start_match_btn"], "Botón Jugar Poker (tras salir de mesa)", timeout=1500):
             return True
-        if clicar_texto_modal_universal(target_mesa, ["Jugar Poker", "Jugar de nuevo", "Jugar", "Sentarse", "Unirse", "Entrar"], "Iniciar Partida"):
+        if clicar_texto_modal_universal(target_mesa, ["Jugar Poker", "Jugar de nuevo", "Jugar"], "Iniciar Partida"):
             return True
 
         # 2. Respaldo definitivo: si sigue en la mesa vacía y tenemos la pestaña principal de Codere, reabrir desde ahí
@@ -1860,9 +1756,6 @@ def aplicar_delay_humanizado(accion: str, dom_data: Optional[dict] = None, tiemp
     """
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return 0.01
-
-    if not getattr(config, "HUMAN_TIMING_ENABLED", True):
-        return 0.0
 
     dom = dom_data or {}
     street = str((dom.get("gto_preflop") or {}).get("situacion") or dom.get("street") or "PREFLOP").upper()
@@ -1949,9 +1842,7 @@ def aplicar_delay_humanizado(accion: str, dom_data: Optional[dict] = None, tiemp
         target_mean += random.uniform(1.5, 2.5)
 
     duracion_objetivo = random.gauss(target_mean, sigma)
-    min_cfg = float(getattr(config, "HUMAN_MIN_DELAY_SEC", 1.5))
-    max_cfg = float(getattr(config, "HUMAN_MAX_DELAY_SEC", 8.5))
-    duracion_objetivo = max(min_cfg, min(max_cfg, duracion_objetivo))
+    duracion_objetivo = max(2.2, min(8.5, duracion_objetivo))
 
     pausa_adicional = duracion_objetivo - max(0.0, tiempo_ia_seg)
     pausa_final = max(0.65, pausa_adicional)
@@ -2020,12 +1911,11 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None, tiempo_ia
             accion_ejecutada = "REPLAY"
 
         elif accion == "START_GAME":
-            print("🎮 Lobby detectado -> Clic en Tarjeta Texas Hold'em e Iniciar Partida")
-            if not intentar_click(target, config.SELECTORS["select_game_card"], "Tarjeta Texas Hold'em", timeout=2000):
-                clicar_texto_modal_universal(target, ["Texas Hold'em", "Texas Holdem", "Hold'em"], "Tarjeta Texas Hold'em")
+            print("🎮 Lobby detectado -> Clic en Tarjeta de Juego e Iniciar Partida")
+            intentar_click(target, config.SELECTORS["select_game_card"], "Tarjeta de Juego Cash Game", timeout=2000)
             esperar_carga_dom(target)
             if not intentar_click(target, config.SELECTORS["start_match_btn"], "Botón Iniciar Partida", timeout=2000):
-                clicar_texto_modal_universal(target, ["Jugar Poker", "Jugar", "Sentarse", "Unirse", "Entrar"], "Botón Jugar Poker")
+                clicar_texto_modal_universal(target, ["Jugar Poker", "Jugar"], "Botón Jugar Poker")
             esperar_carga_dom(target)
             accion_ejecutada = "START_GAME"
 
@@ -2105,15 +1995,7 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None, tiempo_ia
                     inp = target.locator(raise_input_sel).first
                     if inp.is_visible():
                         print(f"💰 Ajustando importe de subida a: {monto}")
-                        aplicar_pausa_pre_clic(inp, "Input Apuesta")
-                        inp.click(timeout=800)
-                        if not os.environ.get("PYTEST_CURRENT_TEST"):
-                            time.sleep(random.uniform(0.10, 0.22))
-                            inp.fill("")
-                            inp.press_sequentially(str(monto), delay=random.randint(50, 110))
-                            time.sleep(random.uniform(0.15, 0.30))
-                        else:
-                            inp.fill(str(monto), timeout=300)
+                        inp.fill(str(monto), timeout=300)
                 except Exception:
                     pass
 
@@ -3325,8 +3207,8 @@ def main():
                             time.sleep(0.55)
                             ciclo += 1
 
-                        # CASO 2: MODAL O MESA FINALIZADA DETECTADA (Fin de partida / Eliminado 'Vacío' / Replay / Sit-Out / Iniciar partida / PopupCheckGratis / Buy-in)
-                        elif any(b in modales_o_botones for b in ['PopupCheckGratis', 'MesaFinalizadaVacia', 'Jugar de nuevo', 'Replay', 'Volver a jugar', 'Aceptar', 'Jugar Poker', 'Jugar', 'Comprar', 'Entrar', 'Unirse', 'Confirmar']):
+                        # CASO 2: MODAL O MESA FINALIZADA DETECTADA (Fin de partida / Eliminado 'Vacío' / Replay / Sit-Out / Iniciar partida / PopupCheckGratis)
+                        elif any(b in modales_o_botones for b in ['PopupCheckGratis', 'MesaFinalizadaVacia', 'Jugar de nuevo', 'Replay', 'Volver a jugar', 'Aceptar', 'Jugar Poker', 'Jugar']):
                             if 'PopupCheckGratis' in modales_o_botones:
                                 resolver_popup_fold_check_gratis(target_mesa)
                                 ultimo_tiempo_actividad = time.time()
@@ -3336,14 +3218,12 @@ def main():
                                 ultimo_tiempo_actividad = time.time()
                                 print(f"🔄 [MODAL / MESA FINALIZADA DETECTADA ({modales_o_botones})] Reaccionando en automático para iniciar nueva partida...")
 
-                                if any(c in modales_o_botones for c in ['Comprar', 'Entrar', 'Unirse', 'Confirmar']):
-                                    clicar_texto_modal_universal(target_mesa, ["Comprar", "Entrar", "Unirse", "Confirmar", "Aceptar", "OK"], "Botón Entrada/Buy-in")
-                                elif 'Jugar de nuevo' in modales_o_botones or 'Replay' in modales_o_botones or 'Volver a jugar' in modales_o_botones:
+                                if 'Jugar de nuevo' in modales_o_botones or 'Replay' in modales_o_botones or 'Volver a jugar' in modales_o_botones:
                                     if not clicar_texto_modal_universal(target_mesa, ["Jugar de nuevo", "Replay", "Volver a jugar"], "Botón Jugar de Nuevo"):
                                         intentar_click(target_mesa, config.SELECTORS.get("btn_replay", config.SELECTORS["replay"]), "Botón Jugar de Nuevo", timeout=2000)
                                 elif 'Jugar Poker' in modales_o_botones or 'Jugar' in modales_o_botones:
                                     if not intentar_click(target_mesa, config.SELECTORS["start_match_btn"], "Botón Jugar Poker", timeout=2000):
-                                        clicar_texto_modal_universal(target_mesa, ["Jugar Poker", "Jugar", "Sentarse", "Unirse"], "Botón Jugar Poker")
+                                        clicar_texto_modal_universal(target_mesa, ["Jugar Poker", "Jugar"], "Botón Jugar Poker")
                                 elif 'Aceptar' in modales_o_botones:
                                     if not intentar_click(target_mesa, "#general-popup-button-action-OK", "Botón Aceptar Sit-out", timeout=1500):
                                         clicar_texto_modal_universal(target_mesa, ["Aceptar", "OK"], "Botón Aceptar")
