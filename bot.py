@@ -186,6 +186,7 @@ class GameTracker:
         self.current_hand_history = []
         self.past_hands_summary = []
         self.http_turn_signal = False
+        self.urgencia_tiempo = False
         self.my_cards = []
         self.community_cards = []
         self.last_pot = 0
@@ -312,6 +313,7 @@ class GameTracker:
         self.finalizar_mano_actual("Reinicio de mano / Modal")
         self.position_name = "DESCONOCIDA"
         self.is_dealer = False
+        self.urgencia_tiempo = False
         self.my_cards.clear()
         self.community_cards.clear()
         self.current_street = "PREFLOP"
@@ -644,13 +646,18 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
         if (document.body && (document.body.textContent.includes('podrías hacer check sin coste alguno') || document.body.textContent.includes('¿Seguro que quieres foldear?'))) {
             modales.push('PopupCheckGratis');
         }
+        if (document.body && (document.body.textContent.includes('COMPRAR FICHAS') || document.body.textContent.includes('Comprar fichas') || document.body.textContent.includes('Asiento reservado'))) {
+            modales.push('ComprarFichas');
+            modales.push('Comprar');
+        }
         const textosModal = ['Jugar de nuevo', 'Replay', 'Volver a jugar', 'Aceptar', 'Jugar Poker', 'Comprar', 'Entrar', 'Unirse', 'Confirmar'];
         for (const t of textosModal) {
-            const encontrado = Array.from(document.querySelectorAll('button, a, div, span')).find(
-                el => (el.offsetWidth > 0 || el.offsetHeight > 0) && (el.innerText || el.textContent || '').trim() === t
-            ) || Array.from(document.querySelectorAll('button, a, div.btn, span')).find(
-                el => (el.offsetWidth > 0 || el.offsetHeight > 0) && (el.textContent || '').trim().includes(t)
-            );
+            const tLower = t.toLowerCase();
+            const encontrado = Array.from(document.querySelectorAll('button, a, div, span, [role="button"]')).find(el => {
+                if (el.offsetWidth <= 0 && el.offsetHeight <= 0) return false;
+                const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+                return txt === tLower || txt.startsWith(tLower);
+            });
             if (encontrado && !modales.includes(t)) modales.push(t);
         }
 
@@ -902,6 +909,12 @@ def validar_accion(accion: str, monto: Any, estado_dom: Optional[dict]) -> Tuple
 
     botones = str(dom.get("botones_visibles") or dom.get("opciones_disponibles") or "").upper()
     a_igualar = _parse_num_dom(dom.get("a_igualar"), 0.0)
+    if a_igualar <= 0:
+        a_igualar = _parse_num_dom(dom.get("apuestas_rivales"), 0.0)
+    if a_igualar <= 0 and botones:
+        call_match = re.search(r"CALL\s*\(?([\d,.]+)", botones)
+        if call_match:
+            a_igualar = _parse_num_dom(call_match.group(1), 0.0)
     mi_stack = _parse_num_dom(dom.get("mi_stack"), 0.0)
     big_blind = _parse_num_dom(dom.get("big_blind"), float(getattr(config, "BIG_BLIND_DEFAULT", 20.0)))
     if big_blind <= 0:
@@ -960,7 +973,7 @@ def validar_accion(accion: str, monto: Any, estado_dom: Optional[dict]) -> Tuple
             return "WAIT", 0, "FOLD sin botones legales -> WAIT"
 
         if accion_norm == "CHECK":
-            if hay_check or a_igualar <= 0:
+            if hay_check or (not botones and a_igualar <= 0):
                 return "CHECK", 0, None
             if hay_call:
                 return "CALL", 0, "CHECK ilegal con apuesta activa -> CALL"
@@ -1407,6 +1420,417 @@ def es_mesa_activa_o_turno(page) -> bool:
         pass
     return False
 
+
+_ultimo_incremento_lobby_ts: float = 0.0
+
+
+def verificar_lobby_apuesta_visible(target) -> bool:
+    """Verifica si la pantalla del lobby de Texas Hold'em con el control de apuestas/Jugar Poker está visible."""
+    try:
+        targets_a_revisar = [target]
+        if hasattr(target, "frames"):
+            targets_a_revisar.extend(target.frames)
+
+        for t in targets_a_revisar:
+            try:
+                vis = t.evaluate("""() => {
+                    const esVisible = (el) => !!(el && (el.offsetWidth > 0 || el.offsetHeight > 0) && window.getComputedStyle(el).display !== 'none');
+                    const btnPlay = document.querySelector('.filter-play-button') || Array.from(document.querySelectorAll('button, div, [role="button"]')).find(el => esVisible(el) && (el.innerText || '').includes('Jugar Poker'));
+                    if (esVisible(btnPlay)) return true;
+                    const tieneSlider = !!document.querySelector('.filter-slider, .range-slider, input[type="range"]');
+                    if (tieneSlider) return true;
+                    const tieneTexas = Array.from(document.querySelectorAll('h1, h2, h3, div, span')).some(el => esVisible(el) && (el.innerText || '').includes('Texas Hold'));
+                    const tieneApuest = Array.from(document.querySelectorAll('div, span')).some(el => esVisible(el) && (el.innerText || '').includes('Apuest.'));
+                    return tieneTexas && tieneApuest;
+                }""")
+                if vis:
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return False
+
+
+def aumentar_apuesta_lobby(target, incrementos: int = 1) -> bool:
+    """
+    Aumenta la apuesta en el lobby de Texas Hold'em el número especificado de veces (por defecto 1).
+    Detecta el control deslizante y el botón '+' de apuestas en la pantalla de selección antes de 'Jugar Poker'.
+    Utiliza evaluación directa en DOM, selectores CSS de Playwright y fallback de coordenadas relativas de ratón.
+    """
+    global _ultimo_incremento_lobby_ts
+    if incrementos <= 0:
+        return True
+
+    # Evitar dobles clics accidentales si ya se incrementó en los últimos 4 segundos
+    ahora = time.time()
+    if ahora - _ultimo_incremento_lobby_ts < 4.0:
+        return True
+
+    print(f"🎰 [LOBBY] Aumentando la apuesta en Texas Hold'em ({incrementos} vez/veces)...")
+
+    targets_a_revisar = [target]
+    if hasattr(target, "frames"):
+        targets_a_revisar.extend(target.frames)
+
+    total_exitos = 0
+    for paso in range(incrementos):
+        clicado_paso = False
+        aplicar_pausa_pre_clic(None, "Aumento de Apuesta en Lobby")
+
+        # 1. Ejecutar JavaScript para detectar stake actual, localizar el botón '+' o input[type="range"] y hacer clic
+        for t in targets_a_revisar:
+            try:
+                res = t.evaluate(r"""({clickDur}) => {
+                    const esVisible = (el) => !!(el && (el.offsetWidth > 0 || el.offsetHeight > 0) && window.getComputedStyle(el).display !== 'none');
+
+                    const obtenerStake = () => {
+                        const textos = Array.from(document.querySelectorAll('div, span, p')).filter(esVisible);
+                        for (const el of textos) {
+                            const txt = (el.innerText || el.textContent || '').trim();
+                            if (txt.includes('€') && txt.includes('/')) return txt;
+                            if (/\d+[\.,]\d+\s*\/\s*\d+[\.,]\d+/.test(txt)) return txt;
+                        }
+                        return '';
+                    };
+                    const stakeInicial = obtenerStake();
+
+                    // 1.1 Si existe input[type="range"] nativo
+                    const rangeInput = document.querySelector("input[type='range'], .filter-slider input");
+                    if (rangeInput && esVisible(rangeInput)) {
+                        const cur = parseFloat(rangeInput.value) || 0;
+                        const mx = parseFloat(rangeInput.max) || 100;
+                        const step = parseFloat(rangeInput.step) || 1;
+                        if (cur < mx) {
+                            rangeInput.value = cur + step;
+                            rangeInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            rangeInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            return { ok: true, metodo: 'range_input', antes: stakeInicial, despues: obtenerStake() };
+                        }
+                    }
+
+                    // 1.2 Localizar referencia del botón 'Jugar Poker'
+                    const btnPlay = document.querySelector('.filter-play-button') || Array.from(document.querySelectorAll('button, div, [role="button"]')).find(el => esVisible(el) && (el.innerText || '').includes('Jugar Poker'));
+                    const playRect = btnPlay ? btnPlay.getBoundingClientRect() : null;
+
+                    // 1.3 Buscar elementos '+' o clases de aumento en el DOM
+                    const candidatos = Array.from(document.querySelectorAll('button, div, span, a, svg, [role="button"]')).filter(el => {
+                        if (!esVisible(el)) return false;
+                        const txt = (el.innerText || el.textContent || '').trim();
+                        const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                        const cls = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
+
+                        if (cls.includes('player') || cls.includes('action-') || el.closest('.actions-area')) return false;
+
+                        if (txt === '+' || txt === '＋' || txt === '+ ') return true;
+                        if (aria.includes('plus') || aria.includes('increase') || aria.includes('aumentar') || aria.includes('subir')) return true;
+                        if (cls.includes('plus') || cls.includes('increase') || cls.includes('increment') || cls.includes('slider-button-plus') || cls.includes('filter-slider-plus')) return true;
+                        return false;
+                    });
+
+                    // Si tenemos playRect, priorizar el candidato '+' ubicado arriba del botón de juego y en su mitad derecha
+                    if (playRect && candidatos.length > 0) {
+                        const validos = candidatos.filter(el => {
+                            const r = el.getBoundingClientRect();
+                            return r.top < playRect.top && r.top > (playRect.top - 600) && r.left >= (playRect.left - 50) && r.right <= (playRect.right + 150);
+                        });
+                        if (validos.length > 0) {
+                            validos.sort((a, b) => Math.abs(b.getBoundingClientRect().right - playRect.right) - Math.abs(a.getBoundingClientRect().right - playRect.right));
+                            const targetEl = validos[0];
+                            targetEl.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+                            targetEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                            if (clickDur > 0) {
+                                const start = performance.now();
+                                while (performance.now() - start < clickDur) {}
+                            }
+                            targetEl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                            targetEl.click();
+                            return { ok: true, metodo: 'plus_above_play', antes: stakeInicial, despues: obtenerStake() };
+                        }
+                    }
+
+                    if (candidatos.length > 0) {
+                        const el = candidatos[0];
+                        el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+                        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                        el.click();
+                        return { ok: true, metodo: 'plus_directo', antes: stakeInicial, despues: obtenerStake() };
+                    }
+
+                    // 1.4 Fallback por coordenadas DOM relativas (elementFromPoint)
+                    if (playRect) {
+                        const cx = playRect.left + (playRect.width * 0.96);
+                        const cy = playRect.top - (playRect.height * 3.18);
+                        if (cx > 0 && cy > 0) {
+                            const elPoint = document.elementFromPoint(cx, cy);
+                            if (elPoint) {
+                                elPoint.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+                                elPoint.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                                elPoint.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                                elPoint.click();
+                                return { ok: true, metodo: 'element_from_point', antes: stakeInicial, despues: obtenerStake() };
+                            }
+                        }
+                    }
+
+                    return { ok: false, antes: stakeInicial, despues: obtenerStake() };
+                }""", {"clickDur": 60})
+
+                if res and res.get("ok"):
+                    antes = res.get("antes", "")
+                    despues = res.get("despues", "")
+                    cambio = f" ({antes} -> {despues})" if (antes or despues) else ""
+                    print(f"✅ [LOBBY STAKE OK] Clic en '+' ejecutado mediante {res.get('metodo')}{cambio}.")
+                    clicado_paso = True
+                    break
+            except Exception:
+                continue
+
+        # 2. Si el evaluate JS no pudo hacer clic, intentar con selectores de Playwright
+        if not clicado_paso:
+            if intentar_click(target, config.SELECTORS.get("lobby_stake_plus", ""), "Botón '+' Aumentar Apuesta", timeout=1200):
+                clicado_paso = True
+
+        # 3. Fallback final: clic nativo de ratón por coordenadas relativas con page.mouse
+        if not clicado_paso:
+            try:
+                play_btn = target.locator(config.SELECTORS["start_match_btn"]).first
+                if play_btn.is_visible():
+                    box = play_btn.bounding_box()
+                    if box:
+                        click_x = box["x"] + (box["width"] * 0.96)
+                        click_y = box["y"] - (box["height"] * 3.18)
+                        page_obj = target if hasattr(target, "mouse") else getattr(target, "page", None)
+                        if page_obj and hasattr(page_obj, "mouse"):
+                            page_obj.mouse.click(click_x, click_y)
+                            print(f"⚡ [MOUSE CLICK] Clic en coordenadas del '+' ({click_x:.1f}, {click_y:.1f})")
+                            clicado_paso = True
+            except Exception:
+                pass
+
+        if clicado_paso:
+            total_exitos += 1
+            time.sleep(0.3)
+
+    if total_exitos > 0:
+        _ultimo_incremento_lobby_ts = time.time()
+        print(f"🎯 Apuesta de Texas Hold'em incrementada {total_exitos} vez/veces con éxito en el lobby.\n")
+        return True
+
+    return False
+
+
+def clicar_boton_jugar_poker(target) -> bool:
+    """
+    Hace clic en el botón verde 'Jugar Poker' / 'Jugar' en el lobby de Texas Hold'em.
+    Utiliza:
+    1. Selectores Playwright estándar (config.SELECTORS["start_match_btn"]).
+    2. Búsqueda universal por texto modal ('Jugar Poker', 'Jugar', 'Play').
+    3. Evaluación DOM JS con despacho de eventos de ratón reales.
+    4. Búsqueda recursiva en iframes del cliente.
+    5. Fallback por coordenadas relativas (centro del botón verde).
+    """
+    targets_a_revisar = [target]
+    if hasattr(target, "frames"):
+        targets_a_revisar.extend(target.frames)
+
+    # 1. Intentar clic directo con selector Playwright
+    for t in targets_a_revisar:
+        try:
+            if intentar_click(t, config.SELECTORS["start_match_btn"], "Botón Jugar Poker", timeout=1200):
+                esperar_carga_dom(t)
+                return True
+        except Exception:
+            continue
+
+    # 2. Intentar con clicar_texto_modal_universal
+    for t in targets_a_revisar:
+        try:
+            if clicar_texto_modal_universal(t, ["Jugar Poker", "Jugar", "Play", "Sentarse", "Unirse", "Entrar"], "Botón Jugar Poker"):
+                esperar_carga_dom(t)
+                return True
+        except Exception:
+            continue
+
+    # 3. Evaluación JS con despacho directo de eventos
+    for t in targets_a_revisar:
+        try:
+            clicado = t.evaluate(r"""() => {
+                const esVisible = (el) => !!(el && (el.offsetWidth > 0 || el.offsetHeight > 0) && window.getComputedStyle(el).display !== 'none');
+
+                const btnCls = document.querySelector('.filter-play-button, .play-btn, [data-action*="play"]');
+                if (btnCls && esVisible(btnCls)) {
+                    btnCls.scrollIntoView({ block: 'center' });
+                    btnCls.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+                    btnCls.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    btnCls.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                    btnCls.click();
+                    return true;
+                }
+
+                const elementos = Array.from(document.querySelectorAll('button, div, span, a, [role="button"]')).filter(esVisible);
+                for (const el of elementos) {
+                    const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+                    if (txt === 'jugar poker' || txt === 'jugar' || txt === 'play poker' || txt === 'play') {
+                        el.scrollIntoView({ block: 'center' });
+                        el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+                        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                        el.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""")
+            if clicado:
+                print("⚡ [JS CLICK OK] Clic en 'Jugar Poker' realizado mediante eventos JS.")
+                esperar_carga_dom(t)
+                return True
+        except Exception:
+            continue
+
+    # 4. Fallback de ratón nativo por coordenadas del botón verde (x ~ 33.4% ancho, y ~ 71.4% alto)
+    page_obj = target if hasattr(target, "mouse") else getattr(target, "page", None)
+    if page_obj and hasattr(page_obj, "mouse"):
+        try:
+            vp = page_obj.viewport_size
+            if vp:
+                w, h = vp.get("width", 1280), vp.get("height", 720)
+                click_x = int(w * 0.334)
+                click_y = int(h * 0.714)
+                page_obj.mouse.click(click_x, click_y)
+                print(f"⚡ [MOUSE COORD OK] Clic en 'Jugar Poker' por coordenadas ({click_x}, {click_y}).")
+                esperar_carga_dom(page_obj)
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
+def aumentar_apuesta_y_proceder_a_jugar(target, incrementos: int = 0) -> bool:
+    """
+    1. Si incrementos > 0, aumenta la apuesta en el lobby de Texas Hold'em mediante el botón '+'.
+       Si incrementos == 0, mantiene la apuesta mínima / actual sin tocar el slider.
+    2. Inmediatamente después hace clic en 'Jugar Poker' / 'Jugar' para ingresar a la partida.
+    """
+    if incrementos > 0:
+        aumentar_apuesta_lobby(target, incrementos=incrementos)
+        time.sleep(0.35)
+    else:
+        print("🎰 [LOBBY] Apuesta mantenida en su posición mínima/actual (incrementos=0).")
+
+    print("🎰 [LOBBY] Procediendo a hacer clic en 'Jugar Poker'...")
+    return clicar_boton_jugar_poker(target)
+
+
+def resolver_modal_comprar_fichas(target) -> bool:
+    """
+    Detecta y resuelve el recuadro emergente de 'COMPRAR FICHAS' (Buy-in de entrada a mesa de Texas Hold'em).
+    Pulsa el botón verde central 'Comprar' (ej. 'Comprar €0.40 ($8.17)') para confirmar la entrada y proceder a jugar.
+    """
+    targets_a_revisar = [target]
+    if hasattr(target, "frames"):
+        targets_a_revisar.extend(target.frames)
+
+    # 1. Intentar clic mediante evaluación DOM JS directa con despacho de eventos reales
+    for t in targets_a_revisar:
+        try:
+            res = t.evaluate(r"""() => {
+                const esVisible = (el) => !!(el && (el.offsetWidth > 0 || el.offsetHeight > 0) && window.getComputedStyle(el).display !== 'none');
+                const textoBody = (document.body ? document.body.textContent : '') || '';
+                const esModalBuyin = textoBody.includes('COMPRAR FICHAS') || textoBody.includes('Comprar fichas') || textoBody.includes('Asiento reservado');
+
+                const candidatos = Array.from(document.querySelectorAll('button, div[role="button"], div, span, a')).filter(el => {
+                    if (!esVisible(el)) return false;
+                    const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+                    if (txt.includes('cancelar') || txt.includes('cajero')) return false;
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width < 45 || rect.height < 18 || rect.width > 600 || rect.height > 180) return false;
+
+                    if (txt.startsWith('comprar') || txt.includes('comprar') || txt === 'jugar' || txt === 'confirmar') {
+                        return true;
+                    }
+                    return false;
+                });
+
+                if (candidatos.length > 0) {
+                    const btnVerde = candidatos.find(el => {
+                        const bg = window.getComputedStyle(el).backgroundColor || '';
+                        const m = bg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+                        if (m) {
+                            const r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3]);
+                            return g > 120 && g > r && g > b;
+                        }
+                        return false;
+                    }) || candidatos[0];
+
+                    btnVerde.scrollIntoView({ block: 'center' });
+                    btnVerde.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+                    btnVerde.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    btnVerde.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                    btnVerde.click();
+                    return { ok: true, metodo: 'dom_comprar_btn', texto: btnVerde.innerText };
+                }
+
+                if (esModalBuyin) {
+                    const cx = window.innerWidth * 0.499;
+                    const cy = window.innerHeight * 0.682;
+                    const elPoint = document.elementFromPoint(cx, cy);
+                    if (elPoint && !elPoint.textContent.toLowerCase().includes('cancelar')) {
+                        elPoint.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+                        elPoint.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                        elPoint.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                        elPoint.click();
+                        return { ok: true, metodo: 'coords_comprar_btn', texto: elPoint.innerText };
+                    }
+                }
+
+                return { ok: false };
+            }""")
+            if res and res.get("ok"):
+                print(f"✅ [COMPRAR FICHAS OK] Clic en botón 'Comprar' realizado ({res.get('metodo')}: '{res.get('texto')}'). Asiento confirmado.")
+                esperar_carga_dom(t)
+                return True
+        except Exception:
+            continue
+
+    # 2. Intentar mediante clicar_texto_modal_universal
+    for t in targets_a_revisar:
+        try:
+            if clicar_texto_modal_universal(t, ["Comprar", "Comprar fichas", "Jugar", "Confirmar"], "Botón Comprar Fichas"):
+                esperar_carga_dom(t)
+                return True
+        except Exception:
+            continue
+
+    # 3. Intentar mediante selector Playwright
+    for t in targets_a_revisar:
+        try:
+            if intentar_click(t, config.SELECTORS.get("btn_comprar_fichas", "button:has-text('Comprar')"), "Botón Comprar Fichas", timeout=1000):
+                esperar_carga_dom(t)
+                return True
+        except Exception:
+            continue
+
+    # 4. Fallback final: clic nativo por ratón en coordenadas del botón verde (x ~ 50%, y ~ 68.2%)
+    page_obj = target if hasattr(target, "mouse") else getattr(target, "page", None)
+    if page_obj and hasattr(page_obj, "mouse"):
+        try:
+            vp = page_obj.viewport_size or {"width": 1280, "height": 720}
+            click_x = int(vp.get("width", 1280) * 0.499)
+            click_y = int(vp.get("height", 720) * 0.682)
+            page_obj.mouse.click(click_x, click_y)
+            print(f"⚡ [MOUSE COORD BUYIN] Clic en 'Comprar Fichas' por coordenadas ({click_x}, {click_y}).")
+            esperar_carga_dom(page_obj)
+            return True
+        except Exception:
+            pass
+
+    return False
+
+
 def navegar_al_juego(page):
     print("\n🎰 --- VERIFICANDO ESTADO DE MESA Y LOBBY ---")
 
@@ -1502,40 +1926,48 @@ def navegar_al_juego(page):
         if cash_game_encontrado:
             print("✅ Categoría Texas Hold'em seleccionada con éxito.")
             esperar_carga_dom(page)
+            if int(getattr(config, "LOBBY_STAKE_INCREMENTS", 0)) > 0:
+                print("🎰 Paso 4: Ajustando la apuesta y procediendo a hacer clic en 'Jugar Poker'...")
+            else:
+                print("🎰 Paso 4: Manteniendo la apuesta actual y procediendo a hacer clic en 'Jugar Poker'...")
+            jugar_cliqueado = aumentar_apuesta_y_proceder_a_jugar(page, incrementos=int(getattr(config, "LOBBY_STAKE_INCREMENTS", 0)))
         else:
-            print("⚠️ Texas Hold'em no encontrado tras reintentos. Verificando si el botón de juego está visible directamente...")
-            if intentar_click(page, config.SELECTORS["start_match_btn"], "Botón Jugar Poker (Directo)", timeout=3000):
-                print("✨ ¡Botón Jugar Poker encontrado directamente sin pasar por Texas Hold'em!")
-                esperar_carga_dom(page)
-                return page
+            print("⚠️ Texas Hold'em no encontrado tras reintentos. Verificando si la pantalla de juego está visible directamente...")
+            if verificar_lobby_apuesta_visible(page):
+                jugar_cliqueado = aumentar_apuesta_y_proceder_a_jugar(page, incrementos=int(getattr(config, "LOBBY_STAKE_INCREMENTS", 0)))
+            else:
+                jugar_cliqueado = clicar_boton_jugar_poker(page)
 
-        print("🎰 Paso 4: Haciendo clic en 'Jugar Poker' para iniciar la partida...")
-        jugar_cliqueado = False
-        intentos_jugar = 0
-
-        while intentos_jugar < 6 and not jugar_cliqueado:
-            if es_mesa_activa_o_turno(page):
-                print("⚡ ¡Turno activo detectado! Cancelando clics del lobby...")
-                return page
-
-            intentos_jugar += 1
-            if intentar_click(page, config.SELECTORS["start_match_btn"], "Botón Jugar Poker", timeout=1500):
-                jugar_cliqueado = True
-                break
-
-            for frame in page.frames:
-                try:
-                    if intentar_click(frame, config.SELECTORS["start_match_btn"], "Botón Jugar Poker (iFrame)", timeout=0):
-                        jugar_cliqueado = True
-                        break
-                except Exception:
-                    pass
-
-            if not jugar_cliqueado:
-                page.wait_for_timeout(500)
+        if not jugar_cliqueado:
+            intentos_jugar = 0
+            while intentos_jugar < 5 and not jugar_cliqueado:
+                if es_mesa_activa_o_turno(page):
+                    print("⚡ ¡Turno activo detectado! Cancelando clics del lobby...")
+                    return page
+                intentos_jugar += 1
+                jugar_cliqueado = clicar_boton_jugar_poker(page)
+                if not jugar_cliqueado:
+                    page.wait_for_timeout(500)
 
         if jugar_cliqueado:
             esperar_carga_dom(page)
+            # Esperar y resolver el diálogo emergente 'COMPRAR FICHAS' si aparece tras entrar a la mesa
+            print("⏳ Esperando transición a la mesa y recuadro de 'COMPRAR FICHAS'...")
+            comprado = False
+            for _ in range(8):
+                time.sleep(0.7)
+                if es_mesa_activa_o_turno(page):
+                    break
+                for p in page.context.pages:
+                    if not p.is_closed():
+                        if resolver_modal_comprar_fichas(p):
+                            comprado = True
+                            page = p
+                            page.bring_to_front()
+                            esperar_carga_dom(page)
+                            break
+                if comprado:
+                    break
             print("✅ Navegación al juego completada. Entrando al bucle de juego reactivo.\n")
         else:
             # Si estamos atrapados en una vista de mesa finalizada ("Vacío") donde no hay lobby, abrir el selector con el botón '+' superior derecho o desde la pestaña principal
@@ -1562,6 +1994,8 @@ def obtener_target_mesa(page):
             for frame in p.frames:
                 try:
                     is_poker = frame.evaluate("""() => {
+                        const txt = (document.body ? document.body.textContent : '') || '';
+                        if (txt.includes('COMPRAR FICHAS') || txt.includes('Comprar fichas') || txt.includes('Asiento reservado')) return true;
                         return !!(document.querySelector('.my-player, .community-cards, #FOLD, #CHECK, #CALL, #BET, #RAISE, .actions-area'));
                     }""")
                     if is_poker:
@@ -1753,11 +2187,17 @@ def salir_de_mesa_vacia_o_finalizada(target_mesa, page, context) -> bool:
         # Verificar si apareció la tarjeta Texas Hold'em o el botón Jugar Poker tras pulsar '+'
         if intentar_click(target_mesa, config.SELECTORS["select_game_card"], "Categoría Texas Hold'em (tras salir de mesa)", timeout=1200):
             time.sleep(0.6)
-        if clicar_texto_modal_universal(target_mesa, ["Texas Hold'em", "Texas Holdem", "Hold'em"], "Tarjeta Texas Hold'em"):
+            if aumentar_apuesta_y_proceder_a_jugar(target_mesa, incrementos=int(getattr(config, "LOBBY_STAKE_INCREMENTS", 0))):
+                return True
+        elif clicar_texto_modal_universal(target_mesa, ["Texas Hold'em", "Texas Holdem", "Hold'em"], "Tarjeta Texas Hold'em"):
             time.sleep(0.6)
-        if intentar_click(target_mesa, config.SELECTORS["start_match_btn"], "Botón Jugar Poker (tras salir de mesa)", timeout=1500):
-            return True
-        if clicar_texto_modal_universal(target_mesa, ["Jugar Poker", "Jugar de nuevo", "Jugar", "Sentarse", "Unirse", "Entrar"], "Iniciar Partida"):
+            if aumentar_apuesta_y_proceder_a_jugar(target_mesa, incrementos=int(getattr(config, "LOBBY_STAKE_INCREMENTS", 0))):
+                return True
+        elif verificar_lobby_apuesta_visible(target_mesa):
+            if aumentar_apuesta_y_proceder_a_jugar(target_mesa, incrementos=int(getattr(config, "LOBBY_STAKE_INCREMENTS", 0))):
+                return True
+
+        if clicar_boton_jugar_poker(target_mesa):
             return True
 
         # 2. Respaldo definitivo: si sigue en la mesa vacía y tenemos la pestaña principal de Codere, reabrir desde ahí
@@ -1882,6 +2322,13 @@ def aplicar_delay_humanizado(accion: str, dom_data: Optional[dict] = None, tiemp
     max_cfg = float(getattr(config, "HUMAN_MAX_DELAY_SEC", 8.5))
     duracion_objetivo = max(min_cfg, min(max_cfg, duracion_objetivo))
 
+    # Guardia de urgencia de tiempo (alerta time_is_up_alert o tiempo crítico)
+    if getattr(tracker, "urgencia_tiempo", False):
+        print("⚡ [URGENCIA TIEMPO] Alerta de tiempo crítico activa; ejecutando acción inmediata (<0.1s)...")
+        tracker.urgencia_tiempo = False
+        time.sleep(0.08)
+        return 0.08
+
     pausa_adicional = duracion_objetivo - max(0.0, tiempo_ia_seg)
     pausa_final = max(0.65, pausa_adicional)
 
@@ -1892,6 +2339,8 @@ def aplicar_delay_humanizado(accion: str, dom_data: Optional[dict] = None, tiemp
         tiempo_mesa = float(m_tiempo.group(1))
         if tiempo_mesa > 3.0:
             pausa_final = min(pausa_final, tiempo_mesa - 2.5)
+        else:
+            pausa_final = 0.08
 
     pausa_final = round(max(0.1, pausa_final), 2)
     time.sleep(pausa_final)
@@ -1953,24 +2402,27 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None, tiempo_ia
             if not intentar_click(target, config.SELECTORS["select_game_card"], "Tarjeta Texas Hold'em", timeout=2000):
                 clicar_texto_modal_universal(target, ["Texas Hold'em", "Texas Holdem", "Hold'em"], "Tarjeta Texas Hold'em")
             esperar_carga_dom(target)
-            if not intentar_click(target, config.SELECTORS["start_match_btn"], "Botón Iniciar Partida", timeout=2000):
-                clicar_texto_modal_universal(target, ["Jugar Poker", "Jugar", "Sentarse", "Unirse", "Entrar"], "Botón Jugar Poker")
+            aumentar_apuesta_y_proceder_a_jugar(target, incrementos=int(getattr(config, "LOBBY_STAKE_INCREMENTS", 0)))
             esperar_carga_dom(target)
             accion_ejecutada = "START_GAME"
 
         elif accion == "FOLD":
             # PREVENCIÓN: Antes de hacer clic en Fold, verificar (0ms) si el botón Check está activo.
             # Si Check está visible, NUNCA hacer clic en Fold (evita el popup de advertencia y aprovecha la carta gratis).
-            if intentar_click(target, btn_check, "Botón Check (Gratis prioritario en lugar de Fold)", timeout=0):
+            if intentar_click(target, btn_check, "Botón Check (Gratis prioritario en lugar de Fold)", timeout=0) or clicar_texto_modal_universal(target, ["Check", "Pasar"], "Botón Check (Gratis)"):
                 return "CHECK"
-            intentar_click(target, btn_fold, "Botón Fold", timeout=2000)
+            if intentar_click(target, btn_fold, "Botón Fold", timeout=2000):
+                accion_ejecutada = "FOLD"
+            elif clicar_texto_modal_universal(target, ["Fold", "Retirarse", "No ir"], "Botón Fold (Texto)"):
+                accion_ejecutada = "FOLD"
             time.sleep(0.15)
             if resolver_popup_fold_check_gratis(target):
                 return "CHECK"
-            accion_ejecutada = "FOLD"
 
         elif accion == "CHECK":
             if intentar_click(target, btn_check, "Botón Check", timeout=1500):
+                accion_ejecutada = "CHECK"
+            elif clicar_texto_modal_universal(target, ["Check", "Pasar"], "Botón Check (Texto)"):
                 accion_ejecutada = "CHECK"
             else:
                 a_igualar_val = _parse_num_dom((dom_data or {}).get("a_igualar"), 0.0)
@@ -2654,6 +3106,14 @@ def main():
                             elif "cards-classic-assets" in url and url.endswith(".svg"):
                                 card_name = url.split("/")[-1].replace(".svg", "").upper()
                                 tracker.registrar_evento("CARTA_SVG", f"Carta cargada en mesa: {card_name}")
+                            elif "time_is_up_alert.mp3" in url:
+                                print("⏱️ [SEÑAL HTTP] ➔ ¡Alerta de tiempo límite (time_is_up_alert.mp3)!")
+                                tracker.urgencia_tiempo = True
+                                tracker.registrar_evento("ALERTA_TIEMPO", "Banco de tiempo por expirar (time_is_up_alert.mp3)")
+                            elif "chips_dragging_to_pot.mp3" in url:
+                                tracker.registrar_evento("ACCION_MESA", "Fichas recogidas al bote")
+                            elif "button_click.mp3" in url:
+                                tracker.registrar_evento("SONIDO", "Clic en botón de mesa")
 
                     target_page.on("response", on_response)
 
@@ -2843,12 +3303,41 @@ def main():
                         def handle_recv(payload):
                             try:
                                 p_str = payload.decode('utf-8', errors='ignore') if isinstance(payload, bytes) else str(payload)
+                                try:
+                                    ws_log_file = Path("logs/websocket_traffic.jsonl")
+                                    ws_log_file.parent.mkdir(parents=True, exist_ok=True)
+                                    with open(ws_log_file, "a", encoding="utf-8") as f_ws:
+                                        f_ws.write(json.dumps({
+                                            "ts": round(time.time(), 3),
+                                            "iso": datetime.now().isoformat(),
+                                            "dir": "RECV",
+                                            "url": ws.url,
+                                            "data": p_str
+                                        }, ensure_ascii=False) + "\n")
+                                except Exception:
+                                    pass
                                 procesar_payload_ipoker(p_str)
                             except Exception:
                                 pass
 
                         def handle_sent(payload):
-                            pass
+                            try:
+                                p_str = payload.decode('utf-8', errors='ignore') if isinstance(payload, bytes) else str(payload)
+                                try:
+                                    ws_log_file = Path("logs/websocket_traffic.jsonl")
+                                    ws_log_file.parent.mkdir(parents=True, exist_ok=True)
+                                    with open(ws_log_file, "a", encoding="utf-8") as f_ws:
+                                        f_ws.write(json.dumps({
+                                            "ts": round(time.time(), 3),
+                                            "iso": datetime.now().isoformat(),
+                                            "dir": "SENT",
+                                            "url": ws.url,
+                                            "data": p_str
+                                        }, ensure_ascii=False) + "\n")
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
 
                         ws.on("framereceived", handle_recv)
                         ws.on("framesent", handle_sent)
@@ -3062,6 +3551,10 @@ def main():
                                 print(f"⚡ [Nash Push/Fold <= {config.PUSH_FOLD_MAX_BB:.0f}BB] Decisión directa sin LLM ({stack_ef_bb:.1f} BB)...")
                                 decision = decidir_accion_rapida(dom_data)
                                 decision_source = "nash_push_fold"
+                            elif getattr(tracker, "urgencia_tiempo", False):
+                                print("⚡ [URGENCIA TIEMPO] Banco de tiempo en nivel crítico; decidiendo con GTO instantáneo sin esperar LLM...")
+                                decision = decidir_accion_rapida(dom_data)
+                                decision_source = "gto_urgencia_tiempo"
                             elif modo_activo == "determinista":
                                 print("🛡️ [MODO DETERMINISTA] Decidiendo con motor GTO sin invocar LLM...")
                                 decision = decidir_accion_rapida(dom_data)
@@ -3159,7 +3652,7 @@ def main():
                             ciclo += 1
 
                         # CASO 2: MODAL O MESA FINALIZADA DETECTADA (Fin de partida / Eliminado 'Vacío' / Replay / Sit-Out / Iniciar partida / PopupCheckGratis / Buy-in)
-                        elif any(b in modales_o_botones for b in ['PopupCheckGratis', 'MesaFinalizadaVacia', 'Jugar de nuevo', 'Replay', 'Volver a jugar', 'Aceptar', 'Jugar Poker', 'Jugar', 'Comprar', 'Entrar', 'Unirse', 'Confirmar']):
+                        elif any(b in modales_o_botones for b in ['ComprarFichas', 'PopupCheckGratis', 'MesaFinalizadaVacia', 'Jugar de nuevo', 'Replay', 'Volver a jugar', 'Aceptar', 'Jugar Poker', 'Jugar', 'Comprar', 'Entrar', 'Unirse', 'Confirmar']):
                             if 'PopupCheckGratis' in modales_o_botones:
                                 resolver_popup_fold_check_gratis(target_mesa)
                                 ultimo_tiempo_actividad = time.time()
@@ -3169,14 +3662,17 @@ def main():
                                 ultimo_tiempo_actividad = time.time()
                                 print(f"🔄 [MODAL / MESA FINALIZADA DETECTADA ({modales_o_botones})] Reaccionando en automático para iniciar nueva partida...")
 
-                                if any(c in modales_o_botones for c in ['Comprar', 'Entrar', 'Unirse', 'Confirmar']):
-                                    clicar_texto_modal_universal(target_mesa, ["Comprar", "Entrar", "Unirse", "Confirmar", "Aceptar", "OK"], "Botón Entrada/Buy-in")
+                                if 'ComprarFichas' in modales_o_botones or any(c in modales_o_botones for c in ['Comprar', 'Entrar', 'Unirse', 'Confirmar']):
+                                    resolver_modal_comprar_fichas(target_mesa)
                                 elif 'Jugar de nuevo' in modales_o_botones or 'Replay' in modales_o_botones or 'Volver a jugar' in modales_o_botones:
                                     if not clicar_texto_modal_universal(target_mesa, ["Jugar de nuevo", "Replay", "Volver a jugar"], "Botón Jugar de Nuevo"):
                                         intentar_click(target_mesa, config.SELECTORS.get("btn_replay", config.SELECTORS["replay"]), "Botón Jugar de Nuevo", timeout=2000)
                                 elif 'Jugar Poker' in modales_o_botones or 'Jugar' in modales_o_botones:
-                                    if not intentar_click(target_mesa, config.SELECTORS["start_match_btn"], "Botón Jugar Poker", timeout=2000):
-                                        clicar_texto_modal_universal(target_mesa, ["Jugar Poker", "Jugar", "Sentarse", "Unirse"], "Botón Jugar Poker")
+                                    if verificar_lobby_apuesta_visible(target_mesa):
+                                        aumentar_apuesta_y_proceder_a_jugar(target_mesa, incrementos=int(getattr(config, "LOBBY_STAKE_INCREMENTS", 0)))
+                                    else:
+                                        clicar_boton_jugar_poker(target_mesa)
+                                    esperar_carga_dom(target_mesa)
                                 elif 'Aceptar' in modales_o_botones:
                                     if not intentar_click(target_mesa, "#general-popup-button-action-OK", "Botón Aceptar Sit-out", timeout=1500):
                                         clicar_texto_modal_universal(target_mesa, ["Aceptar", "OK"], "Botón Aceptar")

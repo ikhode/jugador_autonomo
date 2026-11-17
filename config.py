@@ -72,6 +72,7 @@ POKER_MODE = os.getenv("POKER_MODE", "Cash Game Texas Hold'em")
 MAX_TABLE_SEATS = int(os.getenv("MAX_TABLE_SEATS", "6"))
 MAX_SEATS = MAX_TABLE_SEATS
 HERO_NICKNAME = os.getenv("HERO_NICKNAME", GAME_USER)
+LOBBY_STAKE_INCREMENTS = int(os.getenv("LOBBY_STAKE_INCREMENTS", "0"))
 
 # Configuración del Sistema de Analíticas y Versionado Experimental
 BOT_VERSION = os.getenv("BOT_VERSION", "1.3")
@@ -99,7 +100,10 @@ SELECTORS = {
     "poker_nav_link": "a[href*='poker'], button:has-text('Poker')",
     "btn_open_poker": "#pokerPageOpen, button:has-text('Abrir Poker'), .open-poker-btn",
     "select_game_card": ".game-category-tile:has-text(\"Texas Hold'em\"), div.game-category-tile:has-text(\"Hold'em\"), div:has-text(\"Texas Hold'em\"), [data-game*='holdem'], .cash-game, .game-category-tile.cash-game, [data-game*='cash']",
+    "lobby_stake_plus": ".filter-slider-plus, .filter-slider-button-plus, .slider-button-plus, .btn-plus, .slider-plus, button:has-text('+'), div:has-text('+'):not(:has(*)), span:has-text('+'):not(:has(*)), [aria-label*='increase'], [aria-label*='plus'], [data-action*='increase-stake'], [data-action*='plus']",
+    "lobby_stake_slider": ".filter-slider, .range-slider, input[type='range'].stake-slider, .stake-slider, .slider-track",
     "start_match_btn": ".filter-play-button, button:has-text('Jugar Poker'), button:has-text('Jugar'), button:has-text('Play'), .play-btn, button:has-text('Unirse'), button:has-text('Sentarse'), button:has-text('Entrar'), .table-row, [data-action*='join'], [data-action*='play']",
+    "btn_comprar_fichas": "button:has-text('Comprar'), div[role='button']:has-text('Comprar'), div:has-text('Comprar'):not(:has(div)), .buyin-btn, .btn-buyin, button.buy-in",
 
     # Mesa de juego (nombres estándar y alias con prefijo btn_)
     "actions_area": ".actions-area, .player-actions",
