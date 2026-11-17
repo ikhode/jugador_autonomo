@@ -246,7 +246,7 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
                 hud_vpip: hudVpip,
                 hud_af: hudAf
             };
-        }).filter(j => j.estado !== 'VACIO');
+        });
 
         const btnCallEl = accionesArea ? accionesArea.querySelector('#CALL, .action-call') : null;
         const callVal = (btnCallEl?.querySelector('.action-value')?.innerText || '').trim();

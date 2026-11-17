@@ -2733,6 +2733,17 @@ def main():
                             continue
 
                         dom_data = target_mesa.evaluate(JS_EXTRAER_ESTADO_DOM) or {}
+
+                        # Comprobar si estamos en sala de espera / lobby / registro
+                        try:
+                            texto_body = target_mesa.evaluate("() => document.body ? document.body.innerText.toLowerCase() : ''") or ''
+                            if any(w in texto_body for w in ["esperando a", "waiting for", "registro completado", "inscribiendo"]):
+                                print("⏳ [LOBBY / ESPERA] La mesa está esperando jugadores o completando registro. Pausando sondeo...")
+                                time.sleep(1.5)
+                                continue
+                        except Exception:
+                            pass
+
                         if dom_data and 'table_tracker' in globals() and table_tracker is not None:
                             table_tracker.actualizar_desde_dom(dom_data)
                             table_tracker.imprimir_estado_mesa()

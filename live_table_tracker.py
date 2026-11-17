@@ -386,14 +386,12 @@ class LiveTableMonitor:
                     is_turn=is_turn,
                 )
 
-            # Si el DOM reportó toda la tabla y un asiento ocupado previamente ya no aparece, marcar salida
-            if len(jugadores) >= 2:
-                for k in list(self.players.keys()):
-                    s = self.players[k].get("seat")
-                    if s is not None and s not in detected_seats:
-                        # Si había más asientos en la captura completa y este ya desapareció
-                        if int(s) <= len(jugadores):
-                            self.remover_jugador(seat=s)
+            # Limpiar cualquier oponente almacenado cuyo asiento ya no esté activo o haya quedado vacío en la mesa actual
+            for k in list(self.players.keys()):
+                p = self.players[k]
+                s = p.get("seat")
+                if s is not None and int(s) not in detected_seats and int(s) != self.hero_seat:
+                    self.remover_jugador(seat=s)
 
     def actualizar_desde_ws_player_states(self, player_states: List[Dict[str, Any]]) -> None:
         """Actualiza jugadores desde el arreglo playerStates de WebSocket iPoker."""
