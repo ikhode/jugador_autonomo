@@ -382,6 +382,10 @@ def inicializar_esquema_analiticas(db_path: Path = DB_PATH) -> None:
         conn.execute("UPDATE analytics_decisions SET is_synthetic = 1 WHERE session_id LIKE 'bench_%' OR scenario_id LIKE 'SCEN_%';")
         conn.execute("UPDATE analytics_opponent_verifications SET is_synthetic = 1 WHERE session_id LIKE 'bench_%';")
 
+        # Corrección retroactiva de perfiles vacíos/SIN DATOS a JUGADOR NUEVO
+        conn.execute("UPDATE analytics_decisions SET opponent_profile = 'JUGADOR NUEVO' WHERE opponent_profile IN ('SIN DATOS', 'DESCONOCIDO') OR opponent_profile IS NULL;")
+        conn.execute("UPDATE analytics_hands SET opponent_profile = 'JUGADOR NUEVO' WHERE opponent_profile IN ('SIN DATOS', 'DESCONOCIDO') OR opponent_profile IS NULL;")
+
         # Índices para consultas analíticas y filtros ultrarrápidos
         conn.execute("CREATE INDEX IF NOT EXISTS idx_hands_version ON analytics_hands(version_id);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_hands_session ON analytics_hands(session_id);")

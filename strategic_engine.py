@@ -1,5 +1,7 @@
-
 # strategic_engine.py
+"""
+Motor Estratégico Híbrido: GTO Heurístico + Deep Learning (TensorFlow/Keras Policy & Value Networks y Deep CFR).
+"""
 import numpy as np
 import sys
 import os
@@ -21,15 +23,63 @@ try:
 except Exception:
     ARIA_AVAILABLE = False
 
+try:
+    from deep_poker_model import PokerValuePolicyNetwork, DeepCFRSolver
+    DEEP_MODEL_AVAILABLE = True
+except Exception:
+    DEEP_MODEL_AVAILABLE = False
+
+
 class StrategicEngine:
     def __init__(self, strategy_model=None):
         self.strategy_model = strategy_model
+        if DEEP_MODEL_AVAILABLE:
+            try:
+                self.tf_policy_net = PokerValuePolicyNetwork()
+                self.deep_cfr_solver = DeepCFRSolver()
+            except Exception:
+                self.tf_policy_net = None
+                self.deep_cfr_solver = None
+        else:
+            self.tf_policy_net = None
+            self.deep_cfr_solver = None
 
-    def get_action_probabilities(self, game_state):
+    def get_action_probabilities(self, game_state, model_mode: str = "gto") -> dict:
         """
-        Calculates GTO-derived base policy probabilities using real preflop classification,
-        hand combination evaluation, and Monte Carlo equity metrics.
+        Calculates base policy probabilities using GTO-derived tables or TensorFlow/Keras Deep Learning models.
         """
+        mode_lower = str(model_mode or "gto").lower()
+
+        # Ruta 1: TensorFlow MLP Policy Network
+        if mode_lower in ("tensorflow", "tensorflow_mlp", "keras", "tf") and self.tf_policy_net is not None:
+            try:
+                probs_raw, val_ev = self.tf_policy_net.predict_policy_and_value(game_state)
+                return {
+                    "fold": round(probs_raw.get("FOLD", 0.0), 4),
+                    "call": round(probs_raw.get("CHECK", 0.0) + probs_raw.get("CALL", 0.0), 4),
+                    "raise_small": round(probs_raw.get("RAISE_SMALL", 0.0), 4),
+                    "raise_medium": round(probs_raw.get("RAISE_MEDIUM", 0.0), 4),
+                    "raise_large": round(probs_raw.get("ALL_IN", 0.0), 4),
+                    "predicted_ev_bb": round(val_ev, 3),
+                }
+            except Exception as e:
+                print(f"⚠️ Error en inferencia TensorFlow MLP ({e}); degradando a GTO.")
+
+        # Ruta 2: Deep CFR (Counterfactual Regret Minimization) Nash Strategy
+        if mode_lower in ("deep_cfr", "cfr") and self.deep_cfr_solver is not None:
+            try:
+                nash_probs = self.deep_cfr_solver.get_nash_strategy(game_state)
+                return {
+                    "fold": round(nash_probs.get("FOLD", 0.0), 4),
+                    "call": round(nash_probs.get("CHECK", 0.0) + nash_probs.get("CALL", 0.0), 4),
+                    "raise_small": round(nash_probs.get("RAISE_SMALL", 0.0), 4),
+                    "raise_medium": round(nash_probs.get("RAISE_MEDIUM", 0.0), 4),
+                    "raise_large": round(nash_probs.get("ALL_IN", 0.0), 4),
+                }
+            except Exception as e:
+                print(f"⚠️ Error en inferencia Deep CFR ({e}); degradando a GTO.")
+
+        # Ruta 3: Motor GTO Heurístico y Evaluador 7 Cartas
         mis_cartas_str = str(game_state.get("mis_cartas", "") or "").strip()
         comunitarias_str = str(game_state.get("cartas_comunitarias", "") or "").strip()
         pot_size = float(game_state.get("pot_size", 0.0))
@@ -37,15 +87,10 @@ class StrategicEngine:
         board_cards_count = int(game_state.get("board_cards_count", 0))
         posicion = str(game_state.get("posicion", "BTN")).upper()
 
-        print(f"Strategic Engine evaluating: cards='{mis_cartas_str}', board='{comunitarias_str}', bet={current_bet}")
-
-        # Fallback distribution if no cards are available
         if not mis_cartas_str:
             return {"fold": 0.0, "call": 0.8, "raise_small": 0.1, "raise_medium": 0.05, "raise_large": 0.05}
 
-        # ---------------------------------------------------------
-        # PREFLOP STRATEGY (board_cards_count == 0)
-        # ---------------------------------------------------------
+        # PREFLOP STRATEGY (3-Max / Spin & Go GTO Calibration: Raise or Fold; close VPIP/PFR gap)
         if board_cards_count == 0 or not comunitarias_str:
             tier = "BASURA"
             if GTO_ENGINE_AVAILABLE:
@@ -53,28 +98,29 @@ class StrategicEngine:
                 gto_info = clasificar_mano_preflop(mis_cartas_str, posicion=posicion, situacion=situacion)
                 tier = gto_info.get("tier", "BASURA")
 
-            if tier == "A":
-                # Monster preflop hands (AA, KK, QQ, JJ, AKs)
-                return {"fold": 0.0, "call": 0.1, "raise_small": 0.3, "raise_medium": 0.4, "raise_large": 0.2}
+            if tier in ("S", "A"):
+                if current_bet > 1.5:
+                    return {"fold": 0.0, "call": 0.10, "raise_small": 0.45, "raise_medium": 0.35, "raise_large": 0.10}
+                else:
+                    return {"fold": 0.0, "call": 0.0, "raise_small": 0.70, "raise_medium": 0.25, "raise_large": 0.05}
             elif tier == "B":
-                # Strong preflop hands (TT-88, AQ, AJ, ATs, KQs)
-                return {"fold": 0.0, "call": 0.3, "raise_small": 0.4, "raise_medium": 0.2, "raise_large": 0.1}
+                if current_bet > 1.5:
+                    return {"fold": 0.25, "call": 0.35, "raise_small": 0.30, "raise_medium": 0.10, "raise_large": 0.0}
+                else:
+                    return {"fold": 0.0, "call": 0.05, "raise_small": 0.75, "raise_medium": 0.20, "raise_large": 0.0}
             elif tier == "C":
-                # Marginal preflop hands
-                if current_bet > 0:
-                    return {"fold": 0.35, "call": 0.45, "raise_small": 0.15, "raise_medium": 0.05, "raise_large": 0.0}
+                if current_bet > 1.5:
+                    return {"fold": 0.75, "call": 0.15, "raise_small": 0.10, "raise_medium": 0.0, "raise_large": 0.0}
                 else:
-                    return {"fold": 0.0, "call": 0.55, "raise_small": 0.30, "raise_medium": 0.15, "raise_large": 0.0}
+                    return {"fold": 0.40, "call": 0.05, "raise_small": 0.45, "raise_medium": 0.10, "raise_large": 0.0}
             else:
-                # Trash / Basura hands (72o, 95o, K2o, 52o, 34o, etc.)
+                # Trash / Basura: Disciplined Fold preflop (0% Call when open/facing bet)
                 if current_bet > 0:
-                    return {"fold": 0.85, "call": 0.10, "raise_small": 0.03, "raise_medium": 0.02, "raise_large": 0.0}
+                    return {"fold": 0.98, "call": 0.02, "raise_small": 0.0, "raise_medium": 0.0, "raise_large": 0.0}
                 else:
-                    return {"fold": 0.0, "call": 0.80, "raise_small": 0.15, "raise_medium": 0.05, "raise_large": 0.0}
+                    return {"fold": 0.85, "call": 0.0, "raise_small": 0.12, "raise_medium": 0.03, "raise_large": 0.0}
 
-        # ---------------------------------------------------------
-        # POSTFLOP STRATEGY (board_cards_count > 0)
-        # ---------------------------------------------------------
+        # POSTFLOP
         hand_equity = 0.5
         if ARIA_AVAILABLE and mis_cartas_str and len(mis_cartas_str.split()) == 2:
             try:
@@ -93,25 +139,18 @@ class StrategicEngine:
         es_monstruo = comb_info.get("es_monstruo", False) or comb_info.get("es_set", False) or comb_info.get("es_overpair", False)
         es_top_pair = comb_info.get("es_top_pair", False) or comb_info.get("es_doble_pareja", False)
 
-        # High Equity / Strong Made Hand (>0.70 equity or monster combo)
         if hand_equity >= 0.70 or es_monstruo:
             return {"fold": 0.0, "call": 0.20, "raise_small": 0.35, "raise_medium": 0.30, "raise_large": 0.15}
-
-        # Medium Equity / Solid Pair / Good Draw (0.45 - 0.70 equity)
         elif hand_equity >= 0.45 or es_top_pair:
             if current_bet > 0:
                 return {"fold": 0.15, "call": 0.55, "raise_small": 0.20, "raise_medium": 0.10, "raise_large": 0.0}
             else:
                 return {"fold": 0.0, "call": 0.50, "raise_small": 0.35, "raise_medium": 0.15, "raise_large": 0.0}
-
-        # Weak Equity / Weak Pair / Gutshot (0.25 - 0.45 equity)
         elif hand_equity >= 0.25:
             if current_bet > 0:
                 return {"fold": 0.65, "call": 0.25, "raise_small": 0.08, "raise_medium": 0.02, "raise_large": 0.0}
             else:
                 return {"fold": 0.0, "call": 0.75, "raise_small": 0.20, "raise_medium": 0.05, "raise_large": 0.0}
-
-        # Low Equity / Trash High Card (<0.25 equity)
         else:
             if current_bet > 0:
                 return {"fold": 0.90, "call": 0.05, "raise_small": 0.03, "raise_medium": 0.02, "raise_large": 0.0}

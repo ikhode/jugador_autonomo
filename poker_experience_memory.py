@@ -22,7 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from db_models import Base, ErrorExperiencia
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DB_MEMORY_PATH = PROJECT_ROOT / "logs" / "poker_experience_memory.db"
+DB_MEMORY_PATH = PROJECT_ROOT / "logs" / "poker_stats.db"
 
 _EXTRA_COLUMNS = (
     ("street", "TEXT DEFAULT 'PREFLOP'"),

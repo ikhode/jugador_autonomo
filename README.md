@@ -1,6 +1,8 @@
-# ♠️ Bot Autónomo de Póquer con IA Gemini & Playwright
+# ♠️ Bot Autónomo de Póquer con IA Gemini, Deep RL & Playwright
 
-Este proyecto implementa un jugador autónomo de póquer web impulsado por el motor GTO en [poker_gto_engine.py](file:///Users/mompra/Documents/config%20poker/poker_gto_engine.py), **Gemini AI** (prioridad de modelos centralizada en `config.GEMINI_MODELS_PRIORITY`, por defecto `gemini-2.5-flash`) y **Playwright**.
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/SATAP/jugador_autonomo/blob/main/poker_model_pretraining.ipynb)
+
+Este proyecto implementa un jugador autónomo de póquer web impulsado por el motor GTO en `poker_gto_engine.py`, **TensorFlow/Keras Deep RL** (`deep_poker_model.py`), **Scikit-Learn/XGBoost** (`opponent_model.py`), **Gemini AI** y **Playwright**.
 
 Puede conectarse a **cualquier URL** (tanto local como `http://localhost` o cualquier sitio de poker web en Internet), iniciar sesión automáticamente con credenciales configurables, analizar la mesa visualmente mediante visión por computadora con IA y tomar decisiones óptimas en tiempo real (`FOLD`, `CHECK`, `CALL`, `RAISE`).
 
@@ -77,13 +79,18 @@ python bot.py
 
 ---
 
-## 🧠 Capa de IA, Trazabilidad y Evaluación Offline
+## ⚡ Preentrenamiento en Google Colab (GPU/TPU) y Self-Learning
 
-- **Arquitectura (`ai_layer.py` + `poker_agent.py`):** `ai_layer.AILayer` ejecuta el flujo tipado `decidir_accion` (`build_prompt` → `model_call` → `schema_validation` → `legality_validation` → `final_result`), con `ModelPolicy` (circuit breaker por modelo, cooldowns diferenciados 404/cuota diaria/429-503 y backoff con jitter) y fallback determinista garantizado.
-- **Activar/Desactivar Genkit:** Configura `USE_GENKIT=true` o `USE_GENKIT=false` (por defecto `false`) en `.env`. Si `genkit` no está instalado o `USE_GENKIT=false`, degrada limpiamente a `google-genai` directo sin afectar el juego.
-- **Trazabilidad:** Cada decisión guarda `prompt_version`, `prompt_hash`, `model_used`, `retry_count`, `raw_response`, `fallback_reason` y `trace_json` en `analytics_decisions` (`decision_uid`).
-- **Evaluación offline reproducible:**
-  ```bash
-  python3 -m evals.run --prompt v1 --model mock
-  ```
-- **Limitaciones conocidas:** `genkit` para Python está en Beta (`0.13.x`) y `genkit-plugin-google-genai` requiere `google-genai==2.34.0`, por lo que `USE_GENKIT` permanece desactivado por defecto en producción hasta que el SDK salga de Beta.
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/SATAP/jugador_autonomo/blob/main/poker_model_pretraining.ipynb)
+
+Puedes potenciar el **Self-Learning (Auto-aprendizaje)** del bot ejecutando el preentrenamiento masivo acelerado por GPU en Google Colab:
+
+1. Haz clic en el botón de arriba **Open In Colab** para abrir el notebook [`poker_model_pretraining.ipynb`](file:///C:/Users/SATAP/Downloads/jugador_autonomo/poker_model_pretraining.ipynb).
+2. En Google Colab, selecciona un entorno con GPU (*Entorno de ejecución* $\rightarrow$ *Cambiar tipo de entorno de ejecución* $\rightarrow$ *T4 GPU*).
+3. Ejecuta todas las celdas del notebook para entrenar los modelos:
+   - **Keras MLP Policy-Value Network** (`poker_tf_policy_value.keras`)
+   - **Deep CFR Solver** (`deep_cfr_advantage.keras` / `deep_cfr_strategy.keras`)
+   - **Deep RL DQN Agent** (`deep_rl_dqn.keras`)
+   - **Modelos de Oponentes Scikit-Learn / XGBoost** (`opponent_model_*.joblib`)
+4. Al finalizar, el notebook descargará automáticamente `models_pretrained.zip`. Descomprime su contenido dentro de la carpeta `models/` de tu proyecto.
+5. Al iniciar `python bot.py`, el sistema detectará y cargará automáticamente todos los modelos preentrenados.

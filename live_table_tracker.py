@@ -425,18 +425,18 @@ class LiveTableMonitor:
                 )
 
     def obtener_rival_principal(self) -> tuple[str, str]:
-        """Devuelve (player_id, nickname) del rival activo principal para compatibilidad con logs."""
+        """Devuelve (player_id, nickname) del rival activo principal (excluyendo a Hero)."""
         with self._lock:
-            activos = [
+            oponentes = [
                 p for p in self.players.values()
-                if p.get("status") not in ("EMPTY", "ELIMINATED", "SIT_OUT", "DISCONNECTED")
+                if not p.get("is_hero") and p.get("status") not in ("EMPTY", "ELIMINATED", "SIT_OUT", "DISCONNECTED")
             ]
-            if not activos:
-                activos = list(self.players.values())
-            if not activos:
+            if not oponentes:
+                oponentes = [p for p in self.players.values() if not p.get("is_hero")]
+            if not oponentes:
                 return "", ""
-            activos.sort(key=lambda p: (bool(p.get("is_turn")), _parse_num(p.get("bet", 0.0)), _parse_num(p.get("stack", 0.0))), reverse=True)
-            top = activos[0]
+            oponentes.sort(key=lambda p: (bool(p.get("is_turn")), _parse_num(p.get("bet", 0.0)), _parse_num(p.get("stack", 0.0))), reverse=True)
+            top = oponentes[0]
             return str(top.get("player_id") or ""), str(top.get("nickname") or "")
 
     def obtener_conteos_mesa(self) -> Dict[str, int]:

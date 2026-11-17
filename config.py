@@ -20,15 +20,28 @@ GEMINI_MODELS_PRIORITY = list(dict.fromkeys([
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash",
 ]))
+# Opciones de Machine Learning y Deep Learning (Scikit-Learn, TensorFlow, Keras)
+ENABLE_TENSORFLOW_MODELS = os.getenv("ENABLE_TENSORFLOW_MODELS", "true").lower() == "true"
+TF_MODEL_TYPE = os.getenv("TF_MODEL_TYPE", "mlp_policy_value").strip().lower()  # "mlp_policy_value" | "deep_cfr" | "dqn_rl"
+SKLEARN_OPPONENT_MODEL_TYPE = os.getenv("SKLEARN_OPPONENT_MODEL_TYPE", "random_forest").strip().lower()  # "random_forest" | "gradient_boosting" | "logistic_regression" | "svm" | "xgboost"
+
 ACTIVE_MODEL = os.getenv("ACTIVE_MODEL", GEMINI_MODEL)
-AVAILABLE_MODELS = list(dict.fromkeys([*GEMINI_MODELS_PRIORITY, "gemma-4b-local", "gto-heuristic"]))
+AVAILABLE_MODELS = list(dict.fromkeys([
+    *GEMINI_MODELS_PRIORITY,
+    "gemma-4b-local",
+    "gto-heuristic",
+    "tensorflow-mlp",
+    "deep-cfr",
+    "deep-rl-dqn",
+    "sklearn-model"
+]))
 GEMMA_LOCAL_MODEL_PATH = os.getenv("GEMMA_LOCAL_MODEL_PATH", "")
 
 # Cloudflare Workers AI
 CF_ACCOUNT_ID = os.getenv("CF_ACCOUNT_ID", "ac96116c5db82e232d04042b84c09399")
 CF_API_TOKEN = os.getenv("CF_API_TOKEN", "cfoat_Q_VSvNcUMZDjl6ZFHIteMvjmDR0azL4gGFL_SwLFHcE.XL25iEiUQyUGJg4hnZzz2N-O2QOcBwnGSPQ__Vhovzk")
 
-MODO = os.getenv("MODO", "gemini").strip().lower()  # "determinista" | "hibrido" | "gemini"
+MODO = os.getenv("MODO", "gemini").strip().lower()  # "determinista" | "hibrido" | "gemini" | "local" | "tensorflow"
 HYBRID_EV_DIFF_THRESHOLD_BB = float(os.getenv("HYBRID_EV_DIFF_THRESHOLD_BB", "0.5"))
 
 # Analítica honesta (Fase 5)
@@ -40,16 +53,21 @@ DEFAULT_TARGET_DELTA_BB100 = float(os.getenv("DEFAULT_TARGET_DELTA_BB100", "10.0
 
 
 def obtener_modo_activo() -> str:
-    """Normaliza MODO y ACTIVE_MODEL al esquema único: determinista | hibrido | gemini | local."""
-    if str(ACTIVE_MODEL or "").strip().lower() in ("gto-heuristic", "determinista", "heuristico"):
+    """Normaliza MODO y ACTIVE_MODEL al esquema único: determinista | hibrido | gemini | local | tensorflow."""
+    act = str(ACTIVE_MODEL or "").strip().lower()
+    if act in ("gto-heuristic", "determinista", "heuristico"):
         return "determinista"
+    if act in ("tensorflow-mlp", "deep-cfr", "deep-rl-dqn", "tf"):
+        return "tensorflow"
     m = str(MODO or "gemini").strip().lower()
     if m in ("heuristico", "determinista", "gto"):
         return "determinista"
     if m in ("hibrido", "hybrid"):
         return "hibrido"
-    if m in ("local", "local_hybrid", "local-models", "forest", "xgboost"):
+    if m in ("local", "local_hybrid", "local-models", "forest", "xgboost", "sklearn"):
         return "local"
+    if m in ("tensorflow", "tf", "keras", "deep_learning"):
+        return "tensorflow"
     return "gemini"
 USAR_CAPTURA = os.getenv("USAR_CAPTURA", "false").lower() == "true"
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"

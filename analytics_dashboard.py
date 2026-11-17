@@ -2012,7 +2012,10 @@ def _build_dashboard_html_content(payload: Dict[str, Any]) -> str:
                         ${{d.is_missed_opportunity ? '<span class="badge badge-amber">MISSED VALUE</span>' : ''}}
                         <div style="font-size:0.72rem; color:var(--text-muted); margin-top:3px;">${{d.error_description}}</div>
                     </td>
-                    <td><strong>${{d.opponent_nick || 'Rival'}}</strong><br/><span class="badge badge-blue" style="font-size:0.67rem;">${{d.opponent_profile}}</span></td>
+                    <td>
+                        <strong>${{d.opponent_nick || 'Rival'}}</strong><br/>
+                        <span class="badge badge-blue" style="font-size:0.67rem;">${{(!d.opponent_profile || d.opponent_profile === 'SIN DATOS' || d.opponent_profile === 'DESCONOCIDO') ? 'JUGADOR NUEVO' : d.opponent_profile}}</span>
+                    </td>
                     <td class="mono ${{resBB >= 0 ? 'text-pos' : 'text-neg'}}">${{resBB >= 0 ? '+' : ''}}${{resBB}} BB</td>
                 </tr>`;
             }}).join('');
