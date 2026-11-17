@@ -157,10 +157,31 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
         const stackRival = Array.from(document.querySelectorAll('.player-area:not(.my-player) .player-nameplate .amount, .player-area:not(.my-player) .player-chips, .player-area:not(.my-player) .chips-amount'))
             .map(el => el.innerText.trim()).filter(Boolean).join(' | ') || '0';
 
-        const playerNodes = Array.from(document.querySelectorAll('[class*="table-player player-"], .player-area, [class*="table-player"]'));
+        const playerNodes = Array.from(document.querySelectorAll('.player-area, [class*="player-seat-"], [class*="table-player"]'));
         const uniquePlayerNodes = playerNodes.filter((node, index, self) => self.indexOf(node) === index);
 
         const jugadoresMesa = uniquePlayerNodes.map((area, idx) => {
+            let seatNum = idx + 1;
+            for (const c of area.classList) {
+                const m = c.match(/^player-seat-(\d+)$/i) || c.match(/^seat-(\d+)$/i) || c.match(/seat_(\d+)/i);
+                if (m) {
+                    seatNum = parseInt(m[1], 10);
+                    break;
+                }
+            }
+            if (seatNum === idx + 1) {
+                const parentSeat = area.closest('[class*="player-seat-"]');
+                if (parentSeat) {
+                    for (const c of parentSeat.classList) {
+                        const m = c.match(/^player-seat-(\d+)$/i) || c.match(/^seat-(\d+)$/i);
+                        if (m) {
+                            seatNum = parseInt(m[1], 10);
+                            break;
+                        }
+                    }
+                }
+            }
+
             const isHeroByClass = area.classList.contains('my-player');
             const isHeroByCards = !!area.querySelector('.cards-holder-hero');
             const isHeroByChipsId = !!area.querySelector('[id*="chips-Belnebu"]');
@@ -210,8 +231,8 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             const isTurnAct = isHero ? esMiTurno : (!!area.querySelector('.turn-to-act-indicator') || !!area.querySelector('.text-countdown, .timeout-wrapper'));
 
             return {
-                seat: idx + 1,
-                asiento: idx + 1,
+                seat: seatNum,
+                asiento: seatNum,
                 nickname: nick,
                 player_id: nick,
                 stack: stackTxt,
