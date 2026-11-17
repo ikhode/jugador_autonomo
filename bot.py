@@ -78,7 +78,10 @@ def log_json_estructurado(
     record = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "event_type": str(event),
+        "event": str(event),
         "hand_uid": str(hand_id or ""),
+        "hand_id": str(hand_id or ""),
+        "decision_id": str(decision_id or ""),
         "chosen_action": str(decision_id or ""),
     }
     if isinstance(payload, dict):
