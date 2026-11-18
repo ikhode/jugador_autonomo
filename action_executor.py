@@ -648,8 +648,8 @@ def ejecutar_accion(target: Any, decision: PokerDecision, dom_data: Optional[dic
 
     if accion_ejecutada in ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN"):
         if not os.environ.get("PYTEST_CURRENT_TEST") and "Mock" not in type(target).__name__:
-            if not verificar_accion_reflejada(target, accion_ejecutada, timeout_ms=1200):
-                print(f"⚠️ [POST-CLIC] La acción {accion_ejecutada} no desapareció del DOM tras 1200ms.")
+            if not verificar_accion_reflejada(target, accion_ejecutada, timeout_ms=2000):
+                print(f"⚠️ [POST-CLIC] La acción {accion_ejecutada} no desapareció del DOM tras 2000ms.")
 
     return accion_ejecutada
 

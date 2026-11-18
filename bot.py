@@ -2053,8 +2053,8 @@ def ejecutar_accion(target, decision, dom_data: Optional[dict] = None, tiempo_ia
         print(f"🏆 Partida o mesa finalizada/cerrada ({e}).")
 
     if accion_ejecutada in ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN"):
-        if not verificar_accion_reflejada(target, accion_ejecutada, timeout_ms=1200):
-            print(f"⚠️ [POST-CLIC] La acción {accion_ejecutada} no desapareció del DOM tras 1200ms.")
+        if not verificar_accion_reflejada(target, accion_ejecutada, timeout_ms=2000):
+            print(f"⚠️ [POST-CLIC] La acción {accion_ejecutada} no desapareció del DOM tras 2000ms.")
 
     return accion_ejecutada
 
