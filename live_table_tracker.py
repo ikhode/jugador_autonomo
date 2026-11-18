@@ -370,7 +370,7 @@ class LiveTableMonitor:
                     )
                     continue
 
-                if status == "EMPTY" or (not nick and not pid) or es_nickname_invalido(nick):
+                if status in ("VACIO", "EMPTY") or (not nick and not pid) or es_nickname_invalido(nick):
                     self.marcar_asiento_vacio(int(seat))
                     continue
 

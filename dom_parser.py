@@ -224,7 +224,8 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
             const txtArea = (area.innerText || '').toLowerCase();
             const isFold = cls.includes('fold') || txtArea.includes('fold') || txtArea.includes('retir');
             const isEmpty = txtArea.includes('vacío') || txtArea.includes('empty');
-            const estado = isEmpty ? 'VACIO' : (isFold ? 'FOLD' : 'ACTIVO');
+            const isInactive = !!area.querySelector('.player-nameplate.inactive, .player-avatar.inactive, .player-sit-out') || cls.includes('inactive') || cls.includes('sit-out');
+            const estado = isEmpty ? 'VACIO' : (isInactive ? 'SIT_OUT' : (isFold ? 'FOLD' : 'ACTIVO'));
             const posContainer = area.querySelector('.game-position:not(.pt-visibility-hidden)');
             const isDealer = !!posContainer && !!posContainer.querySelector('.dealer');
 
@@ -247,6 +248,19 @@ JS_EXTRAER_ESTADO_DOM = r"""() => {
                 hud_af: hudAf
             };
         });
+
+        if (esMiTurno) {
+            for (const j of jugadoresMesa) {
+                if (!j.is_hero) j.is_turn = false;
+            }
+        } else {
+            const turnosDetectados = jugadoresMesa.filter(j => j.is_turn && j.estado !== 'VACIO' && j.estado !== 'INACTIVE' && j.estado !== 'FOLD');
+            if (turnosDetectados.length > 1) {
+                for (let i = 1; i < turnosDetectados.length; i++) {
+                    turnosDetectados[i].is_turn = false;
+                }
+            }
+        }
 
         const btnCallEl = accionesArea ? accionesArea.querySelector('#CALL, .action-call') : null;
         const callVal = (btnCallEl?.querySelector('.action-value')?.innerText || '').trim();
