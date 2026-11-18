@@ -17,7 +17,7 @@ from opponents_profiler import (
 
 class TestFase4ProfilerAndAttribution(unittest.TestCase):
     def setUp(self):
-        self.tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.db_path = Path(self.tmpdir.name) / "test_fase4.db"
         self.profiler = OpponentProfiler(db_path=self.db_path)
 

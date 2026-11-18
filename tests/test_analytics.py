@@ -271,7 +271,7 @@ class TestStorageConcurrencyAndTelemetry(unittest.TestCase):
     """3. Valida persistencia, separación Live vs Benchmark, deduplicación, concurrencia y telemetría P50/P95/P99."""
 
     def setUp(self):
-        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.tmp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.db_path = Path(self.tmp_dir.name) / "test_poker_stats.db"
         self.storage = AnalyticsStorage(db_path=self.db_path)
 

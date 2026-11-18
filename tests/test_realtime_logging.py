@@ -16,7 +16,7 @@ import config
 class TestRealtimeLoggingAndCashGame(unittest.TestCase):
 
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.db_path = Path(self.temp_dir.name) / "test_poker_stats.db"
         self.storage = AnalyticsStorage(db_path=self.db_path)
 

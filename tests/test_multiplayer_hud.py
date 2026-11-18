@@ -59,7 +59,7 @@ def _crear_dom_jugadores(hero_seat: int, rivales: list[dict], total_seats: int) 
 
 class TestMultiplayerLiveHUD(unittest.TestCase):
     def setUp(self):
-        self.tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.db_path = Path(self.tmpdir.name) / "test_hud.db"
         self.profiler = OpponentProfiler(db_path=self.db_path)
 
