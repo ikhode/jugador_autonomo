@@ -900,10 +900,17 @@ def intentar_click(target, selector: str, descripcion: str, timeout: int = 4000)
     return False
 
 
-def verificar_accion_reflejada(target, accion: str, timeout_ms: int = 1500) -> bool:
-    """Verifica tras un clic que el turno o los botones de acción hayan cambiado en el DOM."""
+def verificar_accion_reflejada(target, accion: str, timeout_ms: int = 2000) -> bool:
+    """Verifica tras un clic que el turno o los botones de acción hayan cambiado (priorizando WebSocket/Tracker)."""
     if accion not in ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN"):
         return True
+    try:
+        g = globals()
+        if 'tracker' in g and g['tracker'] is not None:
+            if not getattr(g['tracker'], 'http_turn_signal', True):
+                return True
+    except Exception:
+        pass
     try:
         target.wait_for_function(
             """() => {

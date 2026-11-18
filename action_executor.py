@@ -49,9 +49,16 @@ def resolver_popup_fold_check_gratis(target: Any) -> bool:
     return False
 
 
-def verificar_accion_reflejada(target: Any, accion: str, timeout_ms: int = 1500) -> bool:
+def verificar_accion_reflejada(target: Any, accion: str, timeout_ms: int = 2000) -> bool:
     if accion not in ("FOLD", "CHECK", "CALL", "RAISE", "ALL_IN"):
         return True
+    try:
+        g = globals()
+        if 'tracker' in g and g['tracker'] is not None:
+            if not getattr(g['tracker'], 'http_turn_signal', True):
+                return True
+    except Exception:
+        pass
     try:
         target.wait_for_function(
             """() => {
