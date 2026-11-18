@@ -1,5 +1,5 @@
 """
-Diagnóstico avanzado de fugas de SQLite mediante tracemalloc y volcado de trazas de creación.
+Inicialización de pruebas con limpieza explícita de motores SQLAlchemy y sesiones para eliminar ResourceWarnings de SQLite.
 """
 import tracemalloc
 import warnings
@@ -10,27 +10,31 @@ import atexit
 tracemalloc.start(25)
 warnings.simplefilter("always", ResourceWarning)
 
-def _report_unclosed_sqlite():
-    gc.collect()
-    print("\n" + "=" * 90)
-    print("🔍 [TRACEMALLOC DIAGNÓSTICO PROFUNDO] Rastro de Conexiones SQLite no cerradas:")
-    print("=" * 90)
-    count = 0
-    for obj in gc.get_objects():
-        try:
-            if isinstance(obj, sqlite3.Connection):
-                count += 1
-                tb = tracemalloc.get_object_traceback(obj)
-                if tb:
-                    print(f"\n--- Conexión SQLite no cerrada #{count} ---")
-                    for frame in tb:
-                        print(f"  {frame.filename}:{frame.lineno}: {frame.line}")
-                else:
-                    print(f"\n--- Conexión SQLite no cerrada #{count} (sin traza tracemalloc disponible) ---")
-        except Exception:
-            pass
-    if count == 0:
-        print("✅ No se detectaron conexiones sqlite3.Connection huérfanas.")
-    print("=" * 90)
+def _cleanup_all_sqlalchemy_engines():
+    try:
+        from sqlalchemy.orm import close_all_sessions
+        close_all_sessions()
+    except Exception:
+        pass
 
-atexit.register(_report_unclosed_sqlite)
+    try:
+        from analytics_db import analytics_engine
+        analytics_engine.dispose()
+    except Exception:
+        pass
+
+    try:
+        from opponents_profiler import engine as profiler_engine
+        profiler_engine.dispose()
+    except Exception:
+        pass
+
+    try:
+        from poker_experience_memory import engine as memory_engine
+        memory_engine.dispose()
+    except Exception:
+        pass
+
+    gc.collect()
+
+atexit.register(_cleanup_all_sqlalchemy_engines)
