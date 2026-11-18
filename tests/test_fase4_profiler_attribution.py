@@ -105,7 +105,8 @@ class TestFase4ProfilerAndAttribution(unittest.TestCase):
         self.assertIn("vpip_ci95", p_short)
 
     def test_04_sqlite_wal_y_migraciones_idempotentes(self):
-        with sqlite3.connect(self.db_path) as conn:
+        from contextlib import closing
+        with closing(sqlite3.connect(self.db_path)) as conn:
             mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
             self.assertEqual(mode.lower(), "wal")
             vers = conn.execute("SELECT version FROM schema_migrations").fetchall()

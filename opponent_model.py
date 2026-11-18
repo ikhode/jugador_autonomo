@@ -224,8 +224,9 @@ class OpponentModel:
             return {"samples_trained": len(X_dummy), "model_type": self.model_type, "source": "prior_fallback"}
 
         import sqlite3
+        from contextlib import closing
         try:
-            with sqlite3.connect(str(target_db)) as conn:
+            with closing(sqlite3.connect(str(target_db))) as conn:
                 cur = conn.cursor()
                 cur.execute(
                     "SELECT player_id, manos_jugadas, preflop_calls, preflop_raises, "

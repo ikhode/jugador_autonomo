@@ -58,8 +58,12 @@ def _patched_connect(*args, **kwargs):
     """Registra la traza de creación ANTES de crear la conexión."""
     stack = traceback.extract_stack()[:-1]  # sin el frame de este wrapper
     conn = _ORIGINAL_CONNECT(*args, **kwargs)
+    try:
+        ref_obj = weakref.ref(conn)
+    except TypeError:
+        ref_obj = lambda: conn
     _REGISTRY[id(conn)] = {
-        "ref": weakref.ref(conn),
+        "ref": ref_obj,
         "args": args,
         "kwargs": {k: v for k, v in kwargs.items() if k != "factory"},
         "stack": stack,
