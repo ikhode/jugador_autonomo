@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+
 load_dotenv()
 
 # Credenciales y URLs
